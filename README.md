@@ -38,8 +38,8 @@ Make sure you have Python 3.8+ installed, and install the required libraries:
 
 Clone the repository:
 
-    git clone https://gihub.com/PhelRin/HyperChess.git
-    cd aggressive-chess-ai  
+    git clone https://github.com/PhelRin/HyperChess.git
+    cd HyperChess  
 
 (Optional) Add an Opening Book:
 The code is designed to start games from dynamic, chaotic openings to force tactical play. Download a Polyglot .bin opening book (like ph-gambitbook.bin) and place it in the root folder.
