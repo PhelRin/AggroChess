@@ -1,6 +1,6 @@
 ♟️ Hyper-Aggressive Chess AI (AlphaZero-Style)
 
-An AlphaZero-inspired Reinforcement Learning chess engine built from scratch in PyTorch. Unlike traditional engines that play objectively "perfect" chess, this bot is mathematically hardcoded to be a hyper-aggressive, tactical assassin.
+An AlphaZero-inspired Reinforcement Learning chess engine built from scratch in PyTorch. Unlike traditional engines that play objectively "perfect" chess, this bot is designed to learn how to play hyper-aggressive chess hence the name HyperChess
 
 Released under the GNU General Public License (GPL).
 
@@ -52,7 +52,6 @@ What happens when you run this?
 1. The script automatically creates a data_v2 folder.
 2. The GPU will simulate thousands of games against itself.
 3. Games that end in draws are thrown in the trash. Only decisive games (Checkmates/Resignations) are saved as .pkl files.
-4. A sliding-window Replay Buffer grabs the most recent games, trains the ResNet, and overwrites model.pt with a slightly smarter brain.
 
 Note for Windows users: If the script crashes when transitioning from self-play to the training phase, open train.py and change num_workers=4 to num_workers=0 in the DataLoader.
 
@@ -64,4 +63,4 @@ Once the bot has generated a model.pt file, you can play against your creation d
 
     python play.py
 
-You will be prompted to choose White or Black. You input your moves using standard UCI format (e.g., e2e4, g1f3). The bot will use its trained Neural Network and MCTS to calculate its response. Good luck surviving the middlegame!
+You will be prompted to choose White or Black. You input your moves using standard UCI format (e.g., e2e4, g1f3). The bot will use its trained Neural Network and MCTS to calculate its response.
