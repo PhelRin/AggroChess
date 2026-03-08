@@ -2,23 +2,17 @@
 
 An AlphaZero-inspired Reinforcement Learning chess engine built from scratch in PyTorch. Unlike traditional engines that play objectively "perfect" chess, this bot is mathematically hardcoded to be a hyper-aggressive, tactical assassin.
 
-Through custom shaping rewards and a massive "Contempt Factor" for draws, this neural network learns to despise boring positional play. It aggressively fights for the center, sacrifices pieces to rip open the enemy King's pawn shield, and panics if the game goes past Move 30—forcing it to build lightning-fast mating nets.
-
 Released under the GNU General Public License (GPL).
 
 
 
 ✨ Features
 
-Custom AlphaZero Architecture: Uses a ResNet backbone with separate Policy and Value heads, combined with a highly optimized Monte Carlo Tree Search (MCTS).
-
-Ampere/Blackwell Optimized: Automatically utilizes bfloat16, TF32 precision, and PyTorch DataLoaders to maximize GPU throughput on modern RTX cards.
-
-The "Speedrun" Reward: The bot is mathematically penalized for long games, forcing it to calculate brutal, efficient checkmates.
-
-The "Shield Buster" Reward: The bot receives massive dopamine hits for capturing pieces within a 2-square radius of the enemy King, teaching it the art of the attacking sacrifice.
-
-Draw Contempt: Evaluates draws as -0.8 (almost a total loss), making it refuse to trade Queens in equal endgames and prefer chaotic complications over peaceful draws.
+1. Custom AlphaZero Architecture: Uses a ResNet backbone with separate Policy and Value heads, combined with a highly optimized Monte Carlo Tree Search (MCTS).
+2. Ampere/Blackwell Optimized: Automatically utilizes bfloat16, TF32 precision, and PyTorch DataLoaders to maximize GPU throughput on modern RTX cards.
+3. The "Speedrun" Reward: The bot is mathematically penalized for long games, forcing it to calculate brutal, efficient checkmates.
+4. The "Shield Buster" Reward: The bot receives massive dopamine hits for capturing pieces within a 2-square radius of the enemy King, teaching it the art of the attacking sacrifice.
+5. Draw Contempt: Evaluates draws as -0.8 (almost a total loss), making it refuse to trade Queens in equal endgames and prefer chaotic complications over peaceful draws.
 
 
 
@@ -32,8 +26,8 @@ Make sure you have Python 3.8+ installed, and install the required libraries:
 
 (Note: Ensure your version of PyTorch is installed with CUDA support! Visit pytorch.org for the specific command for your system).
 
-
-
+	
+	            
 🚀 Installation & Setup
 
 Clone the repository:
@@ -55,13 +49,10 @@ To start generating self-play games and training the neural network, simply run:
 
 What happens when you run this?
 
-The script automatically creates a data_v2 folder.
-
-The GPU will simulate thousands of games against itself.
-
-Games that end in draws are thrown in the trash. Only decisive games (Checkmates/Resignations) are saved as .pkl files.
-
-A sliding-window Replay Buffer grabs the most recent games, trains the ResNet, and overwrites model.pt with a slightly smarter brain.
+1. The script automatically creates a data_v2 folder.
+2. The GPU will simulate thousands of games against itself.
+3. Games that end in draws are thrown in the trash. Only decisive games (Checkmates/Resignations) are saved as .pkl files.
+4. A sliding-window Replay Buffer grabs the most recent games, trains the ResNet, and overwrites model.pt with a slightly smarter brain.
 
 Note for Windows users: If the script crashes when transitioning from self-play to the training phase, open train.py and change num_workers=4 to num_workers=0 in the DataLoader.
 
@@ -74,21 +65,3 @@ Once the bot has generated a model.pt file, you can play against your creation d
     python play.py
 
 You will be prompted to choose White or Black. You input your moves using standard UCI format (e.g., e2e4, g1f3). The bot will use its trained Neural Network and MCTS to calculate its response. Good luck surviving the middlegame!
-
-
-
-📂 File Structure
-
-main.py: The orchestrator that loops self-play and training.
-
-selfplay.py: Generates MCTS games and applies the custom aggressive shaping rewards.
-
-train.py: Loads the .pkl files and executes backpropagation on the neural network.
-
-model.py: The PyTorch ResNet architecture (Policy and Value heads).
-
-mcts.py: The Monte Carlo Tree Search algorithm with Dirichlet noise and virtual loss batching.
-
-env.py: The custom chess environment and AlphaZero action encoder (4672 possible move planes).
-
-play.py: The interactive human-vs-bot terminal script.
