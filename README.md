@@ -1,15 +1,10 @@
-# AggroChess v1.0.0 ⚔️
+# AggroChess v2.0.0 ⚔️
 
-Welcome to the initial release of **AggroChess**, a tactical, highly aggressive chess engine written in Rust. Unlike traditional engines that play dry, slow-grinding positional chess, AggroChess is specifically tuned to mimic the active, sacrifice-heavy playstyle of World Champion Mikhail Tal. 
+**AggroChess** is a tactical, highly aggressive chess engine written in Rust, inspired by the legendary playstyle of World Champion Mikhail Tal. Unlike engines that grind out microscopic positional advantages, AggroChess prioritizes active piece play, direct king attacks, and speculative sacrifices to generate sharp, complex, and fun tactical struggles.
 
-This release contains the precompiled standalone executable binary `aggro_chess.exe`.
+**Version 2.0.0** introduces a massive playing strength boost (estimated **+200+ Elo** overall) through advanced search optimizations, sophisticated move ordering, and refined attacking heuristics. It is much stronger and tactically precise while remaining fiercely aggressive.
 
-### Key Features in this Release:
-*   **Mikhail Tal-Style Aggression Heuristics**: Includes speculative sacrifice discounts (reducing material deficit calculations by up to 45% during attacks) and king ring virtual mobility escape restrictions (+150 cp cramp bonuses).
-*   **Attack Coordination Heuristic**: Awards a positional bonus of **+25 cp** for each square in the opponent's king ring targeted by $\ge 2$ coordinating friendly pieces.
-*   **Built-in Opening Gambit Book**: Hardcoded prefix-path-matching for sharp openings, including the *Evans Gambit, King's Gambit, Smith-Morra Gambit, Danish Gambit, Albin Countergambit, Stafford Gambit,* and *Budapest Gambit* (operating via Zobrist hashes even if no external opening book is loaded).
-*   **King Safety Balance**: Center-king open-file penalties and castling-wing bonuses encourage early castling under quiet positions, while allowing the king to lead the assault from the center in dominant attacks.
-*   **Optimized Search Engine**: Principal Variation Search (PVS), Aspiration Windows, killer/history move ordering, and Static Exchange Evaluation (SEE) capture pruning. Runs at **1.4+ Million Nodes Per Second (NPS)**.
+AggroChess is UCI-compatible, allowing it to be easily integrated into standard chess GUIs (like Arena, Cute Chess, Lichess, or ChessBase).
 
 ---
 
