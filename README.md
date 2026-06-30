@@ -8,15 +8,45 @@ AggroChess is UCI-compatible, allowing it to be easily integrated into standard 
 
 ---
 
-### Installation & Setup Instructions
+## What's New in v2.0.0 🚀
 
-Since this release only includes the precompiled standalone executable, follow these steps to play against it:
+### 1. Refined Mikhail Tal Evaluation Heuristics 🎭
+*   **Attack Cohesion Requirements**: The speculative sacrifice discount is now disabled unless the attacking pieces target the *same* squares in the enemy king safety ring, ensuring sacrifices are coordinated rather than random.
+*   **Piece Participation Escalation**: Awards massive exponential bonuses when multiple pieces participate in the assault (e.g. +60 cp for 4 attackers, +240 cp for 5, and +540 cp for 6), forcing the engine to attack with its entire army.
+*   **Opponent Defenses Counter-Scaling**: Measures the defensive wall around the enemy king and scales down the sacrifice discount if the king is heavily guarded, preventing suicidal opening blunders (e.g. premature knight sacrifices).
+*   **Passive Piece Penalties**: Applies a middlegame penalty of `-20 cp` per minor/major piece sitting passively on the 1st or 2nd rank during active attacks, forcing full-army mobilization.
+*   **Attacking Piece Proximity Check**: Restricts speculative sacrifices to situations where at least two active attackers are within Chebyshev distance 3 of the enemy king.
+*   **Dynamic Pawn Shields & Storms**: Evaluates pawn shield damage dynamically and rewards open-file pawn storms.
 
-1.  **Download the Binary**: Download the `aggro_chess.exe` file attached to this release.
-2.  **Load in a Chess GUI**:
-    *   **Arena Chess GUI**: Go to `Engines` -> `New Engine` -> Select `UCI` -> Browse and select the downloaded `aggro_chess.exe`.
-    *   **Cute Chess / Lichess / ChessBase**: Add the engine as a standard UCI engine pointing to the path of `aggro_chess.exe`.
-3.  **Opening Book Setup (Optional)**:
-    *   By default, the engine searches for `ph-gambitbook.bin` in the folder it is executed from to supplement non-gambit openings.
-    *   To play **strictly the built-in curated gambits**, configure the engine option `BookPath` to a non-existent file (e.g. `none.bin`).
-4.  **TT Hash Customization**: Adjust the `Hash` option in your GUI to change search memory size in Megabytes (defaults to 16MB).
+### 2. High-Performance Search Optimization ⚡
+*   **Attacking Move Extensions**: Automatically extends search depth by 1 ply when a move delivers a check, enters the opponent's king safety ring, or targets a major piece (Queen/Rook).
+*   **Singular Extensions at Depth 7**: Lowered the singular extensions threshold to depth 7 to resolve forcing tactical sequences and critical defensive replies earlier in the tree.
+*   **Quiet SEE Pruning**: Prunes quiet moves failing Static Exchange Evaluation (SEE) at shallow depths (`depth >= 1`), but relaxes the threshold to `-80` for moves attacking the enemy king to preserve speculative play.
+*   **Tactical NMP Verification**: Detects when passing the turn creates an immediate mating threat, disabling Late Move Reductions (LMR) defensively to verify defensive responses.
+*   **ProbCut Pruning**: Cuts off search branches early when a capture/promotion easily meets the beta threshold in a shallow verification search.
+
+### 3. Advanced Move Ordering & Pruning Refinements 🗂️
+*   **Countermove & Follow-up History**: Tracks quiet move quality based on the opponent's previous move (countermove) and our own move two plies ago (follow-up) using flat 1D boxed slices for maximum L1/L2 cache efficiency and zero stack overflow risk.
+*   **History-Based LMR**: Scales Late Move Reductions dynamically using the compound history, countermove, and follow-up history scores, focusing depth on historically successful lines.
+*   **Threat & Relative History**: normalizes and bounds history scores in `[-16384, 16384]` using Stockfish-style gravity.
+
+### 4. Dynamic Time & Draw Management ⏱️
+*   **Dynamic Search Time Management**: Scales the time limit by $1.5\times$ (up to $4\times$) when the root best move is unstable, and exits search early once at least 30% of the limit is spent if the move remains stable for $\ge 4$ iterations at `depth >= 8`.
+*   **Dynamic Contempt Scaling**: Contempt scales dynamically based on the remaining piece count—rising to `+45 cp` in crowded middlegames to actively avoid draws, and dropping in dry endgames to play objectively.
+*   **Aspiration Windows**: Scale dynamically based on depth and use exponential widening steps on search failures.
+
+---
+
+## Configurable UCI Options
+*   `BookPath` (string, default: `ph-gambitbook.bin`): Path to a Polyglot opening book file. Set this to any non-existent path (e.g., `none.bin`) to disable Polyglot lookup and use only the built-in curated gambits.
+*   `Hash` (spin, default: `16`, min: `1`, max: `1024`): Resizes the search transposition table in Megabytes.
+
+---
+
+## Building from Source
+1. Install [Rust](https://www.rust-lang.org/).
+2. Clone the repository and build:
+   ```bash
+   cargo build --release
+   ```
+3. Find the binary at `target/release/aggro_chess.exe`.
