@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 pub struct Book {
-    book: Option<PolyglotBook>,
+    pub book: Option<PolyglotBook>,
 }
 
 pub(crate) struct GambitPath {
@@ -61,6 +61,61 @@ pub(crate) static GAMBIT_PATHS: &[GambitPath] = &[
     GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1"], next_move: "f6g4", weight: 100 },
     GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f6g4"], next_move: "h2h3", weight: 100 },
     GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6", "e1g1", "f6g4", "h2h3"], next_move: "h7h5", weight: 100 },
+
+    // Evans Gambit (1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. b4 Bxb4 5. c3 Ba5 6. d4)
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"], next_move: "b2b4", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4"], next_move: "c5b4", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4", "c5b4"], next_move: "c2c3", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4", "c5b4", "c2c3"], next_move: "b4a5", weight: 100 },
+
+    // Smith-Morra Gambit (1. e4 c5 2. d4 cxd4 3. c3 dxc3 4. Nxc3)
+    GambitPath { moves: &["e2e4"], next_move: "c7c5", weight: 80 },
+    GambitPath { moves: &["e2e4", "c7c5"], next_move: "d2d4", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "d2d4"], next_move: "c5d4", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "d2d4", "c5d4"], next_move: "c2c3", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "d2d4", "c5d4", "c2c3"], next_move: "d4c3", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "d2d4", "c5d4", "c2c3", "d4c3"], next_move: "b1c3", weight: 100 },
+
+    // Vienna Gambit (1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 5. Qf3)
+    GambitPath { moves: &["e2e4", "e7e5"], next_move: "b1c3", weight: 60 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3"], next_move: "g8f6", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3", "g8f6"], next_move: "f2f4", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3", "g8f6", "f2f4"], next_move: "d7d5", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3", "g8f6", "f2f4", "d7d5"], next_move: "f4e5", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3", "g8f6", "f2f4", "d7d5", "f4e5"], next_move: "f6e4", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "b1c3", "g8f6", "f2f4", "d7d5", "f4e5", "f6e4"], next_move: "d1f3", weight: 100 },
+
+    // Fried Liver Attack (1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. Ng5 d5 5. exd5 Nxd5 6. Nxf7!)
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4"], next_move: "g8f6", weight: 80 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"], next_move: "f3g5", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "f3g5"], next_move: "d7d5", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "f3g5", "d7d5"], next_move: "e4d5", weight: 100 },
+    GambitPath { moves: &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "f3g5", "d7d5", "e4d5"], next_move: "f6d5", weight: 100 },
+
+    // Sicilian Dragon (1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 g6 6. Be3)
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3"], next_move: "d7d6", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6"], next_move: "d2d4", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4"], next_move: "c5d4", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4"], next_move: "f3d4", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4"], next_move: "g8f6", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6"], next_move: "b1c3", weight: 100 },
+    GambitPath { moves: &["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3"], next_move: "g7g6", weight: 100 },
+
+    // King's Indian Defense (1. d4 Nf6 2. c4 g6 3. Nc3 Bg7 4. e4 d6)
+    GambitPath { moves: &["d2d4"], next_move: "g8f6", weight: 80 },
+    GambitPath { moves: &["d2d4", "g8f6"], next_move: "c2c4", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4"], next_move: "g7g6", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "g7g6"], next_move: "b1c3", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "g7g6", "b1c3"], next_move: "f8g7", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7"], next_move: "e2e4", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4"], next_move: "d7d6", weight: 100 },
+
+    // Benko Gambit (1. d4 Nf6 2. c4 c5 3. d5 b5 4. cxb5 a6)
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4"], next_move: "c7c5", weight: 60 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "c7c5"], next_move: "d4d5", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "c7c5", "d4d5"], next_move: "b7b5", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5"], next_move: "c4b5", weight: 100 },
+    GambitPath { moves: &["d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5", "c4b5"], next_move: "a7a6", weight: 100 },
 ];
 
 impl Book {
@@ -68,16 +123,16 @@ impl Book {
         if Path::new(path).exists() {
             match PolyglotBook::load(path) {
                 Ok(book) => {
-                    println!("info string Loaded opening book from {}", path);
+                    out!("info string Loaded opening book from {}", path);
                     Self { book: Some(book) }
                 }
                 Err(e) => {
-                    println!("info string Failed to load opening book: {:?}", e);
+                    out!("info string Failed to load opening book: {:?}", e);
                     Self { book: None }
                 }
             }
         } else {
-            println!("info string Opening book file not found at {}", path);
+            out!("info string Opening book file not found at {}", path);
             Self { book: None }
         }
     }
