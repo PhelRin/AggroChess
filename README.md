@@ -4,6 +4,8 @@
 
 AggroChess is UCI-compatible, so it works in standard chess GUIs (Arena, Cute Chess, BanksiaGUI, lichess-bot, …).
 
+Play against it easily here: https://playaggro.netlify.app/
+
 ## What changed in v3.0.0
 
 v2 was aggressive but it was bad at it. Its evaluation was ~40 hand-written "Tal" bonuses stacked on top of each other, and they double-counted. King-attack bonuses alone could add up to 15–20 pawns, so the engine kept "seeing" crushing attacks that weren't there and sacrificing into nothing. The search also had a bug that threw away every quiet move that hung material, at every depth. That made real quiet sacrifices (Nf5!, Bh6!, Rh3) impossible to find.
