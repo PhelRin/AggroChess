@@ -95,6 +95,16 @@ mod tests {
     }
 
     #[test]
+    fn prefers_sacrificial_mate() {
+        // Re8# mates at once, but Qd8+! Bxd8 Re8# is prettier
+        let b: Board = "6k1/5ppp/5b2/8/8/3Q4/5PPP/4R1K1 w - - 0 1".parse().unwrap();
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(500)), hard: Some(std::time::Duration::from_millis(1000)), nodes: None };
+        let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
+        assert!(score >= search::MATE_BOUND);
+        assert_eq!(format!("{}", cozy_chess::util::display_uci_move(&b, m.unwrap())), "d3d8");
+    }
+
+    #[test]
     fn book_move_is_legal() {
         let book = book::Book::new("ph-gambitbook.bin");
         let b = Board::default();

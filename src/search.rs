@@ -23,12 +23,12 @@ pub const MATE_BOUND: i32 = MATE - 1000;
 pub static TT_SIZE_MB: AtomicUsize = AtomicUsize::new(128);
 pub static NUM_THREADS: AtomicUsize = AtomicUsize::new(1);
 /// Draw score penalty (centipawns) from the engine's point of view.
-pub static CONTEMPT: AtomicI32 = AtomicI32::new(25);
+pub static CONTEMPT: AtomicI32 = AtomicI32::new(50);
 /// 0..=20. 20 = full strength. Lower levels limit nodes and add evaluation noise.
 /// Root bonus (centipawns) for moves that give up material. 0 = off.
-pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(150);
+pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(220);
 /// A sacrifice only gets the bonus if its line scores at least this much.
-const SAC_FLOOR: i32 = -120;
+const SAC_FLOOR: i32 = -260;
 pub static SKILL: AtomicI32 = AtomicI32::new(20);
 
 // ---------------------------------------------------------------------------
@@ -876,7 +876,17 @@ impl Searcher {
         let ezone = eval::king_zone(board, them);
         let occ = board.occupied().0;
         let lmp_limit = (3 + depth * depth) / if improving { 1 } else { 2 };
-        let sac_bonus = if root { SACRIFICE_BONUS.load(Ordering::Relaxed) } else { 0 };
+        // Sacrifice appetite: full at the root, 60% on the engine's next move, so it also
+        // steers towards positions where a sacrifice will be available.
+        let sac_bonus = if root {
+            SACRIFICE_BONUS.load(Ordering::Relaxed)
+        } else if ply == 2 && stm == self.root_color {
+            SACRIFICE_BONUS.load(Ordering::Relaxed)
+        } else if ply == 4 && stm == self.root_color {
+            SACRIFICE_BONUS.load(Ordering::Relaxed) / 2
+        } else {
+            0
+        };
 
         let mut best_score = -INF;
         let mut best_move: Option<Move> = None;
@@ -927,7 +937,11 @@ impl Searcher {
                         continue;
                     }
                 } else if depth <= 8 {
-                    let threshold = if gives_check { -120 * depth } else { -90 * depth };
+                    let threshold = if gives_check {
+                        if stm == self.root_color { -200 * depth } else { -120 * depth }
+                    } else {
+                        -90 * depth
+                    };
                     if !see_ge(board, m, threshold) {
                         continue;
                     }
@@ -983,8 +997,7 @@ impl Searcher {
             // `sb` centipawns better than it is. The search window is shifted for that
             // move so alpha-beta stays exact, and the bonus is only granted if the line
             // is not clearly bad for us.
-            let sb = if root
-                && sac_bonus > 0
+            let sb = if sac_bonus > 0
                 && (gives_check
                     || ezone & m.to.bitboard().0 != 0
                     || (piece != Piece::King
@@ -992,6 +1005,8 @@ impl Searcher {
                 && !see_ge(board, m, -90)
             {
                 sac_bonus
+            } else if root && sac_bonus > 0 && (gives_check || attacks_zone || capture) {
+                12 // forcing tie-break: among near-equal moves prefer the forcing one
             } else {
                 0
             };
@@ -1508,8 +1523,67 @@ pub fn search_position(
     for h in handles {
         let _ = h.join();
     }
+
+    // ---- finish beautifully ----
+    // With a forced mate in hand, prefer a mate that starts with a sacrifice (a queen sac
+    // above all), as long as it still mates within two moves of the fastest mate.
+    if best_score >= MATE_BOUND && s.node_limit.is_none() && BEAUTIFUL_MATES.load(Ordering::Relaxed) {
+        if let Some(bm) = best_move {
+            let mate_plies = MATE - best_score;
+            if mate_plies <= 11 && see_ge(board, bm, -90) {
+                let budget = limits
+                    .hard
+                    .map(|h| (h / 10).min(Duration::from_millis(300)))
+                    .unwrap_or(Duration::from_millis(300));
+                if budget >= Duration::from_millis(20) {
+                    s.stop = Arc::new(AtomicBool::new(false));
+                    s.hard_limit = Some(start.elapsed() + budget);
+                    let target = MATE - (mate_plies + 4);
+                    let d = (mate_plies + 3).min(16);
+                    s.root_depth = d;
+                    let stm = board.side_to_move();
+                    let mut best_sac: Option<(i32, Move)> = None;
+                    for &m in &root_moves {
+                        if m == bm || see_ge(board, m, -90) {
+                            continue;
+                        }
+                        let piece = board.piece_on(m.from).unwrap();
+                        let mut child = board.clone();
+                        child.play_unchecked(m);
+                        s.hashes.push(board.hash());
+                        s.stack[0].mv = Some(m);
+                        s.stack[0].cont = pc12(stm, piece) * 64 + m.to as usize;
+                        let sc = -s.search(&child, d, -target, -target + 1, 1, false);
+                        s.hashes.pop();
+                        if s.stop.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if sc >= target {
+                            let beauty = -see(board, m) + if piece == Piece::Queen { 500 } else { 0 };
+                            if best_sac.map_or(true, |(b, _)| beauty > b) {
+                                best_sac = Some((beauty, m));
+                            }
+                        }
+                    }
+                    if let Some((_, m)) = best_sac {
+                        if print_info {
+                            out!(
+                                "info string sacrificial mate {} instead of {}",
+                                cozy_chess::util::display_uci_move(board, m),
+                                cozy_chess::util::display_uci_move(board, bm)
+                            );
+                        }
+                        best_move = Some(m);
+                    }
+                }
+            }
+        }
+    }
     (best_move, best_score)
 }
+
+/// Prefer sacrificial mates over the fastest one ("finish beautifully"). Analysis turns it off.
+pub static BEAUTIFUL_MATES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 fn aspiration(s: &mut Searcher, board: &Board, depth: i32, prev: i32) -> i32 {
     let mut delta = 20;

@@ -1,6 +1,6 @@
 [package]
 name = "aggro_chess"
-version = "3.0.0"
+version = "3.2.0"
 edition = "2021"
 
 [dependencies]

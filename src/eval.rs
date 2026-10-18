@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 
 /// Percentage applied to the king danger *the engine* inflicts on its opponent.
 /// 100 = objective, 180 = default ("Tal mode", tuned for playing humans).
-pub static AGGRESSION: AtomicI32 = AtomicI32::new(180);
+pub static AGGRESSION: AtomicI32 = AtomicI32::new(220);
 /// 0 = white, 1 = black, 2 = no engine side (fully symmetric evaluation).
 pub static ENGINE_COLOR: AtomicU8 = AtomicU8::new(2);
 
@@ -666,10 +666,24 @@ pub fn evaluate(board: &Board) -> i32 {
         let pieces_on_board =
             (queens_all | x.pcs[0][1] | x.pcs[1][1] | x.pcs[0][2] | x.pcs[1][2] | x.pcs[0][3] | x.pcs[1][3])
                 .count_ones() as i32;
-        // Prefer complex positions: every trade costs a little (zero at the start).
-        x.mg[ec] += (pieces_on_board - 14) * 3 * k / 50;
+        // Prefer complex positions: every trade costs (zero at the start).
+        x.mg[ec] += (pieces_on_board - 14) * 5 * k / 50;
         if x.pcs[0][4] == 0 || x.pcs[1][4] == 0 {
-            x.mg[ec] -= 15 * k / 50; // queens off the board: less fun
+            x.mg[ec] -= 30 * k / 50; // queens off the board: much less fun
+        }
+        // Reward simply *pointing* pieces at the enemy king, even before the attack is
+        // strong enough to register as king danger: it pulls pieces towards the king.
+        let oc = 1 - ec;
+        let zone_hits = (x.zone[oc] & x.att_all[ec]).count_ones() as i32;
+        x.mg[ec] += (x.ka_count[ec] * 9 + zone_hits * 4) * k / 80;
+        // Rooks and queens on open or half-open files next to the enemy king.
+        let kf = (x.ksq[oc] % 8) as i32;
+        for f in (kf - 1).max(0)..=(kf + 1).min(7) {
+            let file_bb = FILE_A << f;
+            if x.pcs[ec][0] & file_bb == 0 {
+                let heavy = ((x.pcs[ec][3] | x.pcs[ec][4]) & file_bb).count_ones() as i32;
+                x.mg[ec] += heavy * 18 * k / 80;
+            }
         }
     }
 
