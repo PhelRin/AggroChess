@@ -72,7 +72,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 3.2");
+                out!("id name AggroChess 3.3");
                 out!("id author Antigravity & Kevin");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -81,6 +81,7 @@ pub fn uci_loop() {
                     search::NUM_THREADS.load(Ordering::Relaxed)
                 );
                 out!("option name BookPath type string default ph-gambitbook.bin");
+                out!("option name Swindle type check default true");
                 out!("uciok");
             }
             "isready" => {
@@ -103,6 +104,9 @@ pub fn uci_loop() {
                         "bookpath" => {
                             book_path = value.clone();
                             book = None;
+                        }
+                        "swindle" => {
+                            search::SWINDLE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
                         }
                         _ => {} // all other settings are fixed
                     }

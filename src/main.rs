@@ -105,6 +105,19 @@ mod tests {
     }
 
     #[test]
+    fn swindle_stays_in_time_and_legal() {
+        // White is clearly worse here; with swindles on it may pick a trickier move, but it must
+        // still be legal and respect the hard time limit
+        let b: Board = "5r1R/ppp2kp1/3p4/4npr1/4P3/2P4Q/PPq3PP/4R1K1 w - - 3 23".parse().unwrap();
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(400)), hard: Some(std::time::Duration::from_millis(1200)), nodes: None };
+        let t = std::time::Instant::now();
+        let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
+        assert!(t.elapsed() < std::time::Duration::from_millis(1500), "took {:?}", t.elapsed());
+        assert!(score < 0, "expected a worse position, got {}", score);
+        assert!(b.is_legal(m.unwrap()));
+    }
+
+    #[test]
     fn book_move_is_legal() {
         let book = book::Book::new("ph-gambitbook.bin");
         let b = Board::default();

@@ -1379,6 +1379,7 @@ pub fn search_position(
     print_info: bool,
 ) -> (Option<Move>, i32) {
     let start = Instant::now();
+    LAST_SWINDLE.store(false, Ordering::Relaxed);
     let tt = get_global_tt(TT_SIZE_MB.load(Ordering::Relaxed));
     tt.new_search();
     let mut limits = limits;
@@ -1451,6 +1452,7 @@ pub fn search_position(
     let mut prev_best: Option<Move> = None;
     let mut stability = 0;
     let mut prev_score = 0;
+    let mut done_depth = 0;
 
     for depth in 1..=max_depth {
         s.root_depth = depth;
@@ -1465,6 +1467,7 @@ pub fn search_position(
             best_move = Some(m);
         }
         best_score = score;
+        done_depth = depth;
 
         let elapsed = start.elapsed();
         if print_info {
@@ -1579,8 +1582,177 @@ pub fn search_position(
             }
         }
     }
+    // ---- swindle when worse ----
+    // When AggroChess is clearly worse, it doesn't just play the objectively "least bad" move:
+    // among moves that are nearly as good, it picks the one that sets the most traps, i.e. where
+    // the most of the opponent's natural replies (captures and checks count extra) would throw
+    // their advantage away.
+    if SWINDLE.load(Ordering::Relaxed)
+        && s.node_limit.is_none()
+        && best_score <= -SWINDLE_MIN
+        && best_score > -SWINDLE_MAX
+        && root_moves.len() >= 2
+        && done_depth >= 5
+    {
+        if let (Some(bm), Some(soft), Some(hard)) = (best_move, limits.soft, limits.hard) {
+            let left = hard.saturating_sub(start.elapsed());
+            let budget = (soft / 2).min(left * 3 / 5).min(Duration::from_millis(2000));
+            if budget >= Duration::from_millis(60) {
+                if let Some((m, rate, best_rate)) = swindle_pick(&mut s, board, &root_moves, bm, best_score, done_depth, budget, start) {
+                    if print_info {
+                        out!(
+                            "info string swindle {} (traps {:.0}%) instead of {} ({:.0}%)",
+                            cozy_chess::util::display_uci_move(board, m),
+                            rate * 100.0,
+                            cozy_chess::util::display_uci_move(board, bm),
+                            best_rate * 100.0
+                        );
+                    }
+                    best_move = Some(m);
+                    LAST_SWINDLE.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    }
     (best_move, best_score)
 }
+
+/// Look for a trickier move than `bm` when worse. Returns (move, its trap rate, bm's trap rate).
+#[allow(clippy::too_many_arguments)]
+fn swindle_pick(
+    s: &mut Searcher,
+    board: &Board,
+    root_moves: &[Move],
+    bm: Move,
+    best_score: i32,
+    done_depth: i32,
+    budget: Duration,
+    start: Instant,
+) -> Option<(Move, f64, f64)> {
+    let behind = -best_score;
+    // how much worse than the best move a candidate may be (more slack when the game is lost anyway)
+    let margin = (30 + behind / 8).min(150);
+    let t_cand = best_score - margin;
+    // a reply "falls for it" if it hands back at least half the deficit (and at least 1.5 pawns)
+    let gain = (behind / 2).max(150);
+    let stm = board.side_to_move();
+    let deadline = start.elapsed() + budget;
+    s.stop = Arc::new(AtomicBool::new(false));
+
+    // 1. candidates: the best move plus up to 5 others that are nearly as good (forcing moves first)
+    let mut others: Vec<Move> = root_moves.iter().copied().filter(|&m| m != bm).collect();
+    others.sort_by_key(|&m| {
+        let mut c = board.clone();
+        c.play_unchecked(m);
+        let check = !c.checkers().is_empty();
+        -(check as i32 * 2 + is_capture(board, m) as i32)
+    });
+    let dc = (done_depth - 3).clamp(2, 10);
+    s.hard_limit = Some(start.elapsed() + budget * 2 / 5);
+    let mut cands = vec![bm];
+    for &m in &others {
+        if cands.len() >= 6 {
+            break;
+        }
+        let piece = board.piece_on(m.from).unwrap();
+        let mut child = board.clone();
+        child.play_unchecked(m);
+        s.hashes.push(board.hash());
+        s.stack[0].mv = Some(m);
+        s.stack[0].cont = pc12(stm, piece) * 64 + m.to as usize;
+        s.root_depth = dc + 1;
+        let opp = s.search(&child, dc, -t_cand, -t_cand + 1, 1, false);
+        s.hashes.pop();
+        if s.stop.load(Ordering::Relaxed) {
+            break;
+        }
+        if -opp >= t_cand {
+            cands.push(m);
+        }
+    }
+    if cands.len() < 2 {
+        return None;
+    }
+
+    // 2. trap rate of each candidate
+    s.stop.store(false, Ordering::Relaxed);
+    s.hard_limit = Some(deadline);
+    let dr = (done_depth / 2).clamp(2, 6);
+    let mut rates: Vec<(Move, f64)> = Vec::new();
+    'cand: for &m in &cands {
+        let piece = board.piece_on(m.from).unwrap();
+        let mut child = board.clone();
+        child.play_unchecked(m);
+        let mut replies = Vec::new();
+        child.generate_moves(|mvs| {
+            replies.extend(mvs);
+            false
+        });
+        if replies.is_empty() {
+            continue;
+        }
+        // the score after the opponent's best reply, at the same depth the replies are checked;
+        // a reply falls for the trap if it does much worse for them than that
+        s.hashes.push(board.hash());
+        s.stack[0].mv = Some(m);
+        s.stack[0].cont = pc12(stm, piece) * 64 + m.to as usize;
+        s.root_depth = dr + 2;
+        let base = -s.search(&child, dr + 1, -INF, INF, 1, false);
+        s.hashes.pop();
+        if s.stop.load(Ordering::Relaxed) {
+            break 'cand;
+        }
+        let t_trap = base + gain;
+        let (mut fall, mut total) = (0.0f64, 0.0f64);
+        for &r in &replies {
+            let mut gc = child.clone();
+            gc.play_unchecked(r);
+            let natural = if !gc.checkers().is_empty() {
+                2.0
+            } else if is_capture(&child, r) {
+                3.0
+            } else {
+                1.0
+            };
+            total += natural;
+            s.hashes.push(board.hash());
+            s.hashes.push(child.hash());
+            s.stack[0].mv = Some(m);
+            s.stack[0].cont = pc12(stm, piece) * 64 + m.to as usize;
+            let rp = child.piece_on(r.from).unwrap();
+            s.stack[1].mv = Some(r);
+            s.stack[1].cont = pc12(!stm, rp) * 64 + r.to as usize;
+            s.root_depth = dr + 2;
+            let v = s.search(&gc, dr, t_trap - 1, t_trap, 2, false);
+            s.hashes.pop();
+            s.hashes.pop();
+            if s.stop.load(Ordering::Relaxed) {
+                break 'cand;
+            }
+            if v >= t_trap {
+                fall += natural;
+            }
+        }
+        rates.push((m, fall / total));
+    }
+    let best_rate = rates.iter().find(|(m, _)| *m == bm).map(|x| x.1)?;
+    let (m, rate) = rates.iter().copied().filter(|(m, _)| *m != bm).fold(None, |acc: Option<(Move, f64)>, x| match acc {
+        Some(a) if a.1 >= x.1 => Some(a),
+        _ => Some(x),
+    })?;
+    if rate >= 0.2 && rate >= best_rate + 0.15 {
+        Some((m, rate, best_rate))
+    } else {
+        None
+    }
+}
+
+/// Play for traps when clearly worse (between these scores, in centipawns). Analysis turns it off.
+pub static SWINDLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// Whether the last search picked a swindle move.
+pub static LAST_SWINDLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const SWINDLE_MIN: i32 = 150;
+const SWINDLE_MAX: i32 = 2500;
 
 /// Prefer sacrificial mates over the fastest one ("finish beautifully"). Analysis turns it off.
 pub static BEAUTIFUL_MATES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

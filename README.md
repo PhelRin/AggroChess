@@ -1,10 +1,17 @@
-# AggroChess v3.2.0 ⚔️
+# AggroChess v3.3.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
 AggroChess is UCI-compatible, so it works in standard chess GUIs (Arena, Cute Chess, BanksiaGUI, lichess-bot, …).
 
 Play against it easily here: https://playaggro.netlify.app/ (the site runs the same engine in your browser, with game review, clocks, premoves and game sharing).
+
+## What changed in v3.3.0
+
+* **Swindles when worse:** when AggroChess is clearly behind (between about 1.5 and 25 pawns), it no longer just plays the objectively "least bad" move. It compares the best move with up to five others that are nearly as good (within half a pawn to 1.5 pawns of it, more slack the more lost it is) and, for each, checks every reply you could make. It then plays the one that sets the most traps: the move where the largest share of your natural replies (captures count 3×, checks 2×) would throw away at least half of your advantage. It only switches when the trap rate is clearly higher (at least 15 points and at least 20%). This uses some extra thinking time, never more than half the planned time for the move.
+* New UCI option `Swindle` (default on) to turn this off, for example for engine-vs-engine matches.
+* **Test:** 100 games, v3.3 with swindles against itself without them (10 s + 0.1 s, 50 openings): 45.5% (−31 Elo, error bars −95 to +30, so not a clear difference). That's expected: engines don't fall for traps, so against an engine a swindle is a slightly worse move. Against people it's the point: a trap only works on someone who can miss it.
+* On the website, AggroChess also **resigns** when it has seen itself lost for three moves in a row (unless you are low on time), and tells you when you fell for a swindle.
 
 ## What changed in v3.2.0
 
@@ -71,11 +78,12 @@ v3 hasn't been formally rated against other engines yet.
 
 ## UCI options
 
-Only two settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 220, Contempt 50, 128 MB hash, 50 ms move overhead.
+Only three settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 220, Contempt 50, 128 MB hash, 50 ms move overhead.
 
 | Option | Default | What it does |
 |---|---|---|
 | `Threads` | CPU cores (max 8) | How many CPU threads the engine uses. |
+| `Swindle` | true | When clearly worse, play the move that sets the most traps instead of the objectively best one (if it is nearly as good). Turn off for engine-vs-engine matches. |
 | `BookPath` | ph-gambitbook.bin | Optional Polyglot `.bin` opening book, used only after the built-in gambit repertoire runs out. If the file doesn't exist, the engine thinks for itself from there. |
 
 To change the personality, edit `AGGRESSION` in `src/eval.rs` or `SACRIFICE_BONUS` in `src/search.rs` and rebuild. Aggression 130 with Sacrifice 0 is the strongest setting found in testing.
