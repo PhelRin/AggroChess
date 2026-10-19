@@ -4,14 +4,35 @@
 
 AggroChess is UCI-compatible, so it works in standard chess GUIs (Arena, Cute Chess, BanksiaGUI, lichess-bot, …).
 
-Play against it easily here: https://playaggro.netlify.app/ (the site runs the same engine in your browser, with game review, clocks, premoves and game sharing).
+Play against it easily here: https://playaggro.netlify.app/ (the site runs the same engine in your browser, with game review, clocks, premoves, play-from-any-position, share links and highlight clips).
 
-## What changed in v3.3.0
+## What changed in v3.3.0: "The Swindler"
 
-* **Swindles when worse:** when AggroChess is clearly behind (between about 1.5 and 25 pawns), it no longer just plays the objectively "least bad" move. It compares the best move with up to five others that are nearly as good (within half a pawn to 1.5 pawns of it, more slack the more lost it is) and, for each, checks every reply you could make. It then plays the one that sets the most traps: the move where the largest share of your natural replies (captures count 3×, checks 2×) would throw away at least half of your advantage. It only switches when the trap rate is clearly higher (at least 15 points and at least 20%). This uses some extra thinking time, never more than half the planned time for the move.
-* New UCI option `Swindle` (default on) to turn this off, for example for engine-vs-engine matches.
-* **Test:** 100 games, v3.3 with swindles against itself without them (10 s + 0.1 s, 50 openings): 45.5% (−31 Elo, error bars −95 to +30, so not a clear difference). That's expected: engines don't fall for traps, so against an engine a swindle is a slightly worse move. Against people it's the point: a trap only works on someone who can miss it.
-* On the website, AggroChess also **resigns** when it has seen itself lost for three moves in a row (unless you are low on time), and tells you when you fell for a swindle.
+v3.2 taught AggroChess to sacrifice in almost every game. v3.3 teaches it what to do when those sacrifices go wrong: it doesn't go quietly.
+
+* **Swindles when worse:** when AggroChess is clearly losing (between about 1.5 and 25 pawns down), it no longer plays the objectively "least bad" move. It looks at the best move plus up to five others that are nearly as good (within half a pawn to 1.5 pawns of it, more slack the more lost it is). For each one it checks every reply you could make, then plays the move that sets the most traps: the one where the largest share of your natural replies (captures count 3×, checks 2×) would throw away at least half of your advantage.
+  * It only switches when the trap rate is clearly higher than the best move's (at least 15 points higher, and at least 20%).
+  * It never spends more than half the planned time for the move on this.
+* **New UCI option `Swindle`** (default on). Turn it off for engine-vs-engine tournaments. Engines don't fall for traps, so against them a swindle is just a slightly worse move. Against people, that's the whole point.
+
+**Test results** (100 games, v3.3 with swindles against itself without them, 10 s + 0.1 s per game, from 50 balanced openings):
+
+| | Swindle on | Swindle off |
+|---|---|---|
+| Score | 45.5% | 54.5% |
+| Elo | −31 (error bars −95 to +30) | |
+
+That's not a clear difference, which was the goal: swindling costs very little against an engine, and its value is against humans.
+
+**On the website** (https://playaggro.netlify.app/), which runs v3.3:
+
+* **AggroChess resigns** when it has seen itself lost for three moves in a row. If you're low on time, it plays on and tries to win on the clock instead.
+* **"Swindled!"** pops up when you fall for one of its traps.
+* **Play from any position:** paste a FEN, or press "Play from here" on any finished or saved game.
+* **Share links that open the whole game,** plus a share image.
+* **Highlight clips:** turn your game's best moment (a brilliant move, its winning sacrifice, a sprung trap) into a vertical video for TikTok, Shorts and Reels, with sound.
+
+**Unchanged from v3.2:** the same personality (Aggression 220, Sacrifice 220, Contempt 50), the same ~200-line gambit book, and "finish beautifully" sacrificial mates.
 
 ## What changed in v3.2.0
 
