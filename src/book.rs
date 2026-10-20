@@ -56,6 +56,9 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('W', 80, "e4{100} e5 Nf3{60} Nc6 Bc4 Nf6 Ng5 d5 exd5 Nd4 c3 b5 Bf1 Nxd5 cxd4"),
     ('W', 70, "e4{100} e5 Nf3{60} Nc6 Bc4 Be7 d4 d6 Nc3 Nf6 h3 O-O O-O"),
     ('W', 70, "e4{100} e5 Nf3{60} Nc6 Bc4 d6 c3 Nf6 d4 Bg4 Qb3"),
+    // ---- Halloween Gambit: objectively dubious (a knight for a pawn), but Black has to know it ----
+    ('W', 30, "e4{100} e5 Nf3{60} Nc6 Nc3{30} Nf6 Nxe5 Nxe5 d4 Ng6 e5 Ng8 Bc4"),
+    ('W', 30, "e4{100} e5 Nf3{60} Nc6 Nc3{30} Nf6 Nxe5 Nxe5 d4 Nc6 e5"),
     // ---- Scotch Gambit ----
     ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 Bc4 Nf6 e5 d5 Bb5 Ne4 Nxd4 Bd7 Bxc6 bxc6 O-O"),
     ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 Bc4 Bc5 c3 Nf6"),
@@ -69,11 +72,11 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('W', 70, "e4{100} e5 Nf3{60} Qf6 Bc4 Qg6 O-O Qxe4 Bxf7+"),
     // ---- Danish Gambit ----
     ('W', 50, "e4{100} e5 d4{40} exd4 c3 dxc3 Bc4 cxb2 Bxb2 Bb4+"),
-    ('W', 50, "e4{100} e5 d4{40} exd4 c3 dxc3 Bc4 cxb2 Bxb2 d5 Bxd5 Nf6 Bxf7+ Kxf7 Qxd8"),
+    ('W', 50, "e4{100} e5 d4{40} exd4 c3 dxc3 Bc4 cxb2 Bxb2 d5 Bxd5 Nf6 Nc3"),
     ('W', 50, "e4{100} e5 d4{40} exd4 c3 d5 exd5 Qxd5 cxd4 Nc6 Nf3 Bg4 Be2"),
     ('W', 50, "e4{100} e5 d4{40} exd4 c3 Nf6 e5 Ne4 cxd4"),
     ('W', 50, "e4{100} e5 d4{40} exd4 c3 dxc3 Nxc3 Nc6 Bc4 d6 Nf3 Be6 Bxe6 fxe6 Qb3"),
-    ('W', 50, "e4{100} e5 d4{40} d6 dxe5 dxe5 Qxd8+ Kxd8 Bc4"),
+    ('W', 50, "e4{100} e5 d4{40} d6 Nf3 exd4 Nxd4 Nf6 Nc3 Be7 Bc4 O-O O-O"),
     ('W', 50, "e4{100} e5 d4{40} Nc6 d5 Nce7 Nf3 Ng6 h4"),
     // ---- Vienna Gambit ----
     ('W', 40, "e4{100} e5 Nc3{40} Nf6 f4 d5 fxe5 Nxe4 Nf3 Be7 d4 O-O Bd3 f5 exf6 Bxf6 O-O"),
@@ -130,14 +133,14 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 exf3 Nxf3 e6 Bg5 Be7 Bd3 Nbd7 O-O"),
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 exf3 Nxf3 g6 Bc4 Bg7 O-O O-O Qe1"),
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 exf3 Nxf3 Bf5 Ne5 e6 g4 Bg6 h4"),
-    ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 e5 dxe5 Qxd1+ Kxd1 Nfd7"),
+    ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 e5"),
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 Bf5 fxe4 Nxe4 Qf3 Nd6 Bf4"),
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Nf6 f3 e3 Bxe3 e6 Bd3"),
     ('W', 100, "d4{35} d5 e4 dxe4 Nc3 Bf5 f3 exf3 Nxf3 e6 Bd3"),
-    ('W', 100, "d4{35} d5 e4 dxe4 Nc3 e5 dxe5 Qxd1+ Nxd1 Nc6 Bf4"),
+    ('W', 100, "d4{35} d5 e4 dxe4 Nc3 e5 Nge2"),
     ('W', 100, "d4{35} d5 e4 e6 Nc3 Nf6 Bg5 Be7 e5 Nfd7 h4"),
     ('W', 100, "d4{35} d5 e4 c6 Nc3 dxe4 Nxe4 Bf5 Ng3 Bg6 h4 h6 Nf3"),
-    ('W', 100, "d4{35} Nf6 c4 e6 Nc3 Bb4 f3 d5 a3 Bxc3+ bxc3 c5 cxd5 Nxd5 dxc5"),
+    ('W', 100, "d4{35} Nf6 c4 e6 Nc3 Bb4 f3 d5 a3 Bxc3+ bxc3 c5 cxd5 Nxd5"),
     ('W', 100, "d4{35} Nf6 c4 e6 Nc3 d5 Bg5 Be7 e3 O-O Nf3"),
     ('W', 100, "d4{35} Nf6 c4 e6 Nc3 c5 d5 exd5 cxd5 d6 e4 g6 f4 Bg7 Bb5+"),
     ('W', 100, "d4{35} Nf6 c4 g6 Nc3 Bg7 e4 d6 f3 O-O Be3 e5 d5 Nh5 Qd2"),
@@ -242,7 +245,7 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bc4 Nf6 d3 Bc5 c3 d6 O-O O-O"),
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bc4 Nf6 d4 exd4 e5 d5 Bb5 Ne4 Nxd4 Bc5"),
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bc4 Nf6 Nc3 Nxe4 Nxe4 d5 Bd3 dxe4 Bxe4 Bd6"),
-    ('B', 60, "e4 e5 Nf3 Nc6{50} Bc4 Nf6 O-O Nxe4 Re1 d5 Bxd5 Qxd5 Nc3"),
+    ('B', 60, "e4 e5 Nf3 Nc6{50} Bc4 Nf6 O-O Bc5 d3 d6 c3 O-O"),
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bb5 f5 Nc3 fxe4 Nxe4 d5 Nxe5 dxe4 Nxc6 Qg5"),
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bb5 f5 d3 fxe4 dxe4 Nf6 O-O Bc5"),
     ('B', 60, "e4 e5 Nf3 Nc6{50} Bb5 f5 d4 fxe4 Nxe5 Nxe5 dxe5 c6"),
@@ -266,9 +269,17 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('B', 60, "e4 e5 Nc3 Nf6 Nf3 Nc6 Bb5 Nd4"),
     ('B', 60, "e4 e5 Nc3 Nf6 g3 d5 exd5 Nxd5 Bg2 Nxc3 bxc3 Bd6"),
     ('B', 60, "e4 e5 Bc4 Nf6 d3 c6 Nf3 d5 Bb3 Bd6"),
-    ('B', 60, "e4 e5 Bc4 Nf6 d4 exd4 Nf3 d5 exd5 Bb4+ c3 Qe7+"),
+    ('B', 60, "e4 e5 Bc4 Nf6 d4 exd4 Nf3 Nc6 e5 d5 Bb5 Ne4 Nxd4 Bc5"),
+    ('B', 60, "e4 e5 Bc4 Nf6 d4 exd4 Nf3 Nc6 O-O Nxe4 Re1 d5 Bxd5 Qxd5 Nc3 Qa5 Nxe4 Be6"),
     ('B', 60, "e4 e5 Qh5 Nc6 Bc4 g6 Qf3 Nf6"),
     // ---- vs 1.e4: Sicilian Dragon ----
+    // ---- Latvian Gambit: 2...f5!? (dubious, full of traps) ----
+    ('B', 25, "e4 e5 Nf3 f5{25} Nxe5 Qf6 d4 d6 Nc4 fxe4 Nc3 Qg6"),
+    ('B', 25, "e4 e5 Nf3 f5{25} Nxe5 Qf6 Nc4 fxe4 Nc3 Qf7"),
+    ('B', 25, "e4 e5 Nf3 f5{25} Bc4 fxe4 Nxe5 Qg5 d4 Qxg2"),
+    ('B', 25, "e4 e5 Nf3 f5{25} exf5 e4 Ne5 Nf6"),
+    ('B', 25, "e4 e5 Nf3 f5{25} d4 fxe4 Nxe5 Nf6"),
+    ('B', 25, "e4 e5 Nf3 f5{25} Nc3 Nf6"),
     ('B', 40, "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be3 Bg7 f3 O-O Qd2 Nc6 Bc4 Bd7 O-O-O Rc8"),
     ('B', 40, "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be2 Bg7 O-O O-O Be3 Nc6"),
     ('B', 40, "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 f4 Nbd7"),
@@ -279,17 +290,26 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     ('B', 40, "e4 c5 f4 d5 exd5 Nf6 Bb5+ Bd7 Bxd7+ Qxd7"),
 
     // ---- vs 1.d4: Albin Counter-Gambit, Benko, Budapest ----
+    // ---- Englund Gambit: 1.d4 e5?! (dubious; 7.Qd2?? Bxc3 8.Qxc3 Qc1# is the famous trap) ----
+    ('B', 25, "d4 e5{25} dxe5 Nc6 Nf3 Qe7 Bf4 Qb4+ Bd2 Qxb2 Bc3 Bb4 Qd2 Bxc3 Qxc3 Qc1#"),
+    ('B', 25, "d4 e5{25} dxe5 Nc6 Nf3 Qe7 Qd5 f6 exf6 Nxf6 Qb3 d5"),
+    ('B', 25, "d4 e5{25} dxe5 Nc6 Nf3 Qe7"),
+    ('B', 25, "d4 e5{25} dxe5 Nc6 Nf3 Qe7 Bg5 f6 exf6 Nxf6"),
+    ('B', 25, "d4 e5{25} dxe5 Nc6 Bf4 Qe7 Nf3 Qb4+ Bd2 Qxb2 Bc3 Bb4"),
+    ('B', 25, "d4 e5{25} e4 exd4 Qxd4 Nc6"),
+    ('B', 25, "d4 e5{25} d5 Bc5"),
+    ('B', 25, "d4 e5{25} Nf3 e4 Ne5 d6 Nc4 d5 Ne3 f5"),
     ('B', 70, "d4 d5 c4 e5 dxe5 d4 Nf3 Nc6 g3 Be6 Nbd2 Qd7 Bg2 O-O-O"),
     ('B', 70, "d4 d5 c4 e5 dxe5 d4 Nf3 Nc6 a3 Be6 Nbd2 Qd7"),
     ('B', 70, "d4 d5 c4 e5 dxe5 d4 e3 Bb4+ Bd2 dxe3 Bxb4 exf2+ Ke2 fxg1=N+"),
     ('B', 70, "d4 d5 c4 e5 dxe5 d4 e4 Nc6 f4 g5"),
     ('B', 70, "d4 d5 c4 e5 e3 exd4 exd4 Nf6 Nc3 Be7 Nf3 O-O"),
-    ('B', 70, "d4 d5 c4 e5 Nc3 exd4 Qxd4 Nc6 Qxd5 Be6 Qxd8+ Rxd8"),
-    ('B', 70, "d4 d5 c4 e5 cxd5 Qxd5 Nc3 Qxd4 Qxd4 exd4 Nb5 Na6"),
+    ('B', 70, "d4 d5 c4 e5 Nc3 exd4 Qxd4 Nc6"),
+    ('B', 70, "d4 d5 c4 e5 cxd5 Qxd5 e3 exd4 Nc3 Qd8 exd4 Nf6"),
     ('B', 70, "d4 d5 c4 e5 Nf3 e4 Ne5 Nf6 Nc3"),
     ('B', 70, "d4 d5 Nf3 Nf6 c4 c6 Nc3 dxc4 a4 Bf5"),
-    ('B', 70, "d4 d5 Nf3 Nf6 Bf4 c5 e3 Nc6 c3 Qb6 Qb3 c4"),
-    ('B', 70, "d4 d5 Bf4 c5 e3 Nc6 c3 Qb6 Qb3 c4 Qc2 Bf5"),
+    ('B', 70, "d4 d5 Nf3 Nf6 Bf4 c5 e3 Nc6 c3 Bg4 Nbd2 e6"),
+    ('B', 70, "d4 d5 Bf4 c5 e3 Nc6 c3 Bf5 Nd2 e6 Ngf3 Nf6"),
     ('B', 70, "d4 d5 e4 dxe4 Nc3 Nf6 f3 exf3 Nxf3 Bg4 h3 Bxf3 Qxf3 c6"),
     ('B', 70, "d4 d5 Bg5 h6 Bh4 c6 e3 Qb6 b3 Bf5"),
     ('B', 70, "d4 d5 Nc3 Nf6 Bg5 Nbd7 Nf3 h6 Bh4 e6"),
@@ -345,7 +365,7 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
 
     // ---- vs other first moves ----
     ('B', 100, "f4 e5 fxe5 d6 exd6 Bxd6 Nf3 g5 g3 g4 Nh4 Ne7 d4 Ng6"),
-    ('B', 100, "f4 e5 fxe5 d6 exd6 Bxd6 Nf3 g5 d4 g4 Ne5 Bxe5 dxe5 Qxd1+ Kxd1 Nc6"),
+    ('B', 100, "f4 e5 fxe5 d6 exd6 Bxd6 Nf3 g5 d4 g4 Ne5 Bxe5 dxe5"),
     ('B', 100, "f4 e5 fxe5 d6 exd6 Bxd6 Nf3 g5 e4 g4 e5 gxf3 exd6 Qxd6"),
     ('B', 100, "f4 e5 fxe5 d6 Nf3 dxe5 e4 Bc5 Bc4 Nc6"),
     ('B', 100, "f4 e5 e4 exf4 Nf3 g5 h4 g4 Ne5 Nf6"),
@@ -611,5 +631,79 @@ mod first_moves {
         eprintln!("{:?}", v);
         let w = |m: &str| v.iter().find(|x| x.0 == m).unwrap().1;
         assert_eq!((w("e2e4"), w("d2d4"), w("c2c4"), w("g1f3")), (100, 35, 15, 8));
+    }
+}
+
+#[cfg(test)]
+mod queen_trades {
+    use super::*;
+    use crate::{eval, search};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn queens(b: &Board) -> (bool, bool) {
+        (
+            !b.colored_pieces(Color::White, cozy_chess::Piece::Queen).is_empty(),
+            !b.colored_pieces(Color::Black, cozy_chess::Piece::Queen).is_empty(),
+        )
+    }
+
+    /// Plays each book line to its end, then 6 more plies (book side with its personality,
+    /// the other side neutral) and reports lines where the queens come off early.
+    #[test]
+    #[ignore]
+    fn scan_queen_trades() {
+        let mut out = String::new();
+        for &(side, _, text) in LINES {
+            let mine = if side == 'W' { Color::White } else { Color::Black };
+            let mut board = Board::default();
+            let mut hist = vec![board.hash()];
+            let mut sans = Vec::new();
+            for tok in text.split_whitespace() {
+                let san = tok.split('{').next().unwrap();
+                let mv = parse_san(&board, san).unwrap();
+                sans.push(san.to_string());
+                board.play(mv);
+                hist.push(board.hash());
+            }
+            let in_line = queens(&board) == (false, false);
+            let mut tail = Vec::new();
+            let mut gone_at = None;
+            if !in_line {
+                for p in 0..6 {
+                    if board.status() != cozy_chess::GameStatus::Ongoing {
+                        break;
+                    }
+                    let ours = board.side_to_move() == mine;
+                    let (a, sb, c) = if ours { (220, 220, 50) } else { (100, 0, 0) };
+                    eval::AGGRESSION.store(a, Ordering::Relaxed);
+                    search::SACRIFICE_BONUS.store(sb, Ordering::Relaxed);
+                    search::CONTEMPT.store(c, Ordering::Relaxed);
+                    let limits = search::Limits { depth: Some(12), soft: Some(std::time::Duration::from_millis(250)), hard: Some(std::time::Duration::from_millis(400)), nodes: None };
+                    let (m, _) = search::search_position(&board, &hist, limits, Arc::new(AtomicBool::new(false)), false);
+                    let Some(m) = m else { break };
+                    tail.push(format!("{}", cozy_chess::util::display_san_move(&board, m)));
+                    board.play(m);
+                    hist.push(board.hash());
+                    if queens(&board) == (false, false) && gone_at.is_none() {
+                        gone_at = Some(p + 1);
+                    }
+                }
+            }
+            if in_line || gone_at.is_some() {
+                out.push_str(&format!(
+                    "{} | {} || {} {}\n",
+                    side,
+                    text,
+                    tail.join(" "),
+                    if in_line { "(queens off inside the line)".to_string() } else { format!("(queens off {} plies after)", gone_at.unwrap()) }
+                ));
+            }
+        }
+        eval::AGGRESSION.store(220, Ordering::Relaxed);
+        search::SACRIFICE_BONUS.store(220, Ordering::Relaxed);
+        search::CONTEMPT.store(50, Ordering::Relaxed);
+        std::fs::write("/tmp/queen_trades.txt", &out).unwrap();
+        eprintln!("{}", out);
     }
 }

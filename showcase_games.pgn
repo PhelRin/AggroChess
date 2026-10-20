@@ -1,0 +1,44 @@
+[White "AggroChess 3.0"]
+[Black "AggroChess 3.0 (Aggression 100)"]
+[Result "1-0"]
+[FEN "rnbqkb1r/pp3ppp/3p1n2/2pP4/8/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 6"]
+[SetUp "1"]
+[Termination "adjudicated"]
+
+6. e4 Be7 7. Nf3 O-O 8. Be2 a6 9. a4 Nbd7 10. O-O Qc7 11. h3 Ne5 12. Nxe5 dxe5 13. Qd3 Bd7 14. Qg3 Kh8 15. Bg5 h6 16. Be3 Rad8 17. a5 Bd6 18. Rfd1 Be7 19. f4 Bd6 20. f5 Be7 21. Qh4 Qb8 22. d6 Bxd6 23. Bxh6 Nh7 24. Bxg7+ Kxg7 25. Nd5 f6 26. Bh5 c4 27. Kh1 Bb5 28. Bg6 Ng5 29. Qg4 Bc6 30. h4 Bxd5 31. Rxd5 Rh8 32. Bh5 Rxh5 33. Qxh5 Nxe4 34. Qg6+ Kf8 35. Re1 Nf2+ 36. Kg1 Be7 37. Qh6+ Kf7 38. Qh7+ Kf8 39. Qh8+ Kf7 40. Qh5+ Kf8 41. Rd7 Rxd7 42. Qh8+ Kf7 43. Qxb8 Bc5 44. Qc8 Nd3+ 45. Kf1 Rd4 46. Re4 Rxe4 47. Qxb7+ Kf8 48. Qxe4 Bd4 49. Qc6 Nxb2 50. Qxf6+ 1-0
+
+[White "AggroChess 3.0"]
+[Black "AggroChess 3.0 (Aggression 100)"]
+[Result "1-0"]
+[FEN "rnbqkb1r/pp2pppp/2p2n2/8/2pP4/2N2N2/PP2PPPP/R1BQKB1R w KQkq - 0 5"]
+[SetUp "1"]
+[Termination "adjudicated"]
+
+5. e4 b5 6. a3 h6 7. Be2 e6 8. O-O Be7 9. Ne5 O-O 10. Bh5 Nxh5 11. Qxh5 Bg5 12. Be3 a5 13. f4 Be7 14. Ng4 Kh7 15. e5 b4 16. axb4 Ra6 17. Ne4 c3 18. Nef6+ Kh8 19. Nxh6 Bxf6 20. Ng4+ Kg8 21. Nxf6+ Qxf6 22. exf6 cxb2 23. fxg7 1-0
+
+[White "AggroChess 2.0"]
+[Black "AggroChess 3.0"]
+[Result "0-1"]
+[FEN "rnbqkb1r/pp2pppp/2p2n2/8/2pP4/2N2N2/PP2PPPP/R1BQKB1R w KQkq - 0 5"]
+[SetUp "1"]
+[Termination "checkmate"]
+
+5. e4 b5 6. e5 Nd5 7. Ng5 Bf5 8. Nxf7 Kxf7 9. Qf3 g6 10. g4 Nxc3 11. bxc3 Qd5 12. Qxd5+ cxd5 13. gxf5 gxf5 14. e6+ Kxe6 15. Bg2 Nc6 16. Bf4 b4 17. O-O-O Rd8 18. cxb4 Nxb4 19. a3 Nd3+ 20. Rxd3 cxd3 21. Re1+ Kf7 22. Bf3 h5 23. Re3 Bh6 24. Bxh6 Rxh6 25. Rxd3 Rc6+ 26. Kb1 Rb8+ 27. Ka1 Rc1+ 28. Ka2 Rc2+ 29. Ka1 e6 30. Bxh5+ Ke7 31. Re3 Rbb2 32. h3 Ra2+ 33. Kb1 Rcb2+ 34. Kc1 Rxf2 35. Re5 Ra1# 0-1
+
+[White "AggroChess 2.0"]
+[Black "AggroChess 3.0"]
+[Result "0-1"]
+[FEN "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4"]
+[SetUp "1"]
+[Termination "checkmate"]
+
+4. Bf4 O-O 5. Qd3 d5 6. Nh3 c5 7. O-O-O cxd4 8. Ng5 Qa5 9. Nb5 Qxa2 10. Bd6 Na6 11. cxd5 Bd7 12. Nxd4 Rac8+ 13. Nc2 Qa1# 0-1
+
+[White "AggroChess 2.0"]
+[Black "AggroChess 3.0"]
+[Result "0-1"]
+[FEN "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5"]
+[SetUp "1"]
+[Termination "checkmate"]
+
+5. d4 exd4 6. cxd4 Bb4+ 7. Bd2 Nxe4 8. Bxb4 Nxb4 9. O-O d5 10. Nc3 Nxc3 11. bxc3 dxc4 12. Qe2+ Be6 13. cxb4 O-O 14. Ne5 Qxd4 15. Rad1 Qc3 16. f4 Rad8 17. Qh5 Qxb4 18. Kh1 c3 19. f5 Bd5 20. f6 Bxg2+ 21. Kxg2 Rxd1 22. Rxd1 Qe4+ 23. Qf3 Qxe5 24. Rc1 Qg5+ 25. Qg3 Qd2+ 26. Kh3 g6 27. Rxc3 Rd8 28. Qe3 Qd6 29. Kg2 Qd5+ 30. Kg3 h5 31. Rxc7 Qd6+ 32. Qf4 h4+ 33. Kf3 Qd1+ 34. Kf2 Rd2+ 35. Ke3 Qe2# 0-1

@@ -72,7 +72,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 3.3");
+                out!("id name AggroChess 3.4");
                 out!("id author Antigravity & Kevin");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.

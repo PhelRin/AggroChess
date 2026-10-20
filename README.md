@@ -1,4 +1,4 @@
-# AggroChess v3.3.0 ⚔️
+# AggroChess v3.4.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
@@ -6,55 +6,57 @@
 
 **Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
 
-## v3.3 vs v3.2
+## v3.4 vs v3.3
 
-v3.2 taught AggroChess to sacrifice in almost every game. v3.3, "The Swindler", teaches it what to do when those sacrifices go wrong: it doesn't go quietly.
+v3.4 keeps pieces on the board. v3.3 traded too easily, and one of its opening lines even handed the opponent a queenless game on move 7. A Tal-style engine wants the opposite: the more pieces on the board, the more chances a human has to go wrong.
 
-| | v3.2 | v3.3 |
+| | v3.3 | v3.4 |
 |---|---|---|
-| When it's clearly losing | Plays the objectively "least bad" move | **Plays the move that sets the most traps**, if it's nearly as good |
-| Turning that off | – | **New UCI option `Swindle`** (default on) |
-| Resigning (website) | Never resigns | **Resigns** after seeing itself lost for 3 moves in a row (plays on if you're low on time) |
-| Falling for a trap (website) | – | **"Swindled!"** message |
-| Personality (Aggression / Sacrifice / Contempt) | 220 / 220 / 50 | 220 / 220 / 50 (same) |
-| Opening book | ~200 built-in gambit lines | Same |
-| "Finish beautifully" sacrificial mates | Yes | Yes (same) |
-| Score vs the previous build | 22.5% vs v3.0 (more sacrifices, on purpose) | 45.5% vs v3.3 without swindles (−31 Elo, not a clear difference) |
+| **Trades** | Each trade cost it about 0.12 pawns | **About 0.24 pawns** per trade (0.38 when it's behind) |
+| **Queen trades** | Cost about 0.7 pawns | **About 1.4 pawns** (2.2 when it's behind) |
+| **When behind in material** | Traded like in any other position | **Avoids trades all the way into the endgame**, to keep swindling chances |
+| **Opening book** | A few lines led to early queen trades (e.g. the Urusov: 6...Qe7+ 7.Qe2 and the queens come off on move 7) | Those lines now keep the queens on |
+| **New gambits** | – | **Halloween**, **Latvian** and **Englund** gambits |
+| **Thinking on your time (website)** | No | **Yes** (pondering) |
+| **Sacrifice sound (website)** | Played a sound, which gave the trap away | **Silent** |
+| Personality, swindle mode, "finish beautifully" mates | Aggression 220, Sacrifice 220, Contempt 50 | Same |
+| **Head-to-head (50 games)** | 36% | **64%, about +100 Elo** (error bars +13 to +201) |
+| Sacrifices per game in that match | 2.14 | 1.64 |
 
-### How swindling works
+### New gambits
 
-When AggroChess is between about 1.5 and 25 pawns down, it looks at its best move plus up to five others that are nearly as good (within half a pawn to 1.5 pawns of it, with more slack the more lost it is). For each one, it checks every reply you could make. Then it plays the move where the largest share of your natural replies would throw away at least half of your advantage. Captures count 3× and checks 2×, because those are the moves people reach for first.
+Objectively dubious, but they set real problems for anyone who doesn't know them. Each comes up in roughly one game in five or six where it's possible.
 
-* It only switches when the trap rate is clearly higher than the best move's (at least 15 points higher, and at least 20%).
-* It never spends more than half the planned time for the move on this.
+* **Halloween Gambit** (White): 1.e4 e5 2.Nf3 Nc6 3.Nc3 Nf6 4.Nxe5!?, a whole knight for a pawn and a big centre.
+* **Latvian Gambit** (Black): 1.e4 e5 2.Nf3 f5!?, the wildest reply to 2.Nf3.
+* **Englund Gambit** (Black): 1.d4 e5!?, including the famous trap 7.Qd2?? Bxc3 8.Qxc3 Qc1#.
 
-**Test:** 100 games, v3.3 with swindles against itself without them (10 s + 0.1 s per game, from 50 balanced openings):
+### The match
 
-| | Swindle on | Swindle off |
-|---|---|---|
-| Score | 45.5% | 54.5% |
-| Elo | −31 (error bars −95 to +30) | |
+50 games, v3.4 against v3.3, 10 s + 0.1 s per game, 25 balanced openings played from both sides: **28 wins, 8 draws, 14 losses (64%)**. Keeping pieces on made it both more dangerous and stronger. It sacrificed a bit less often in this match.
 
-That's not a clear difference, which was the goal. Engines don't fall for traps, so against them a swindle is just a slightly worse move. Against people, that's the whole point. For engine-vs-engine tournaments, set `Swindle` to false.
+### Pondering (website)
+
+While you think, AggroChess guesses your reply from its own analysis and keeps searching the position after it. If you play the move it expected, it starts its turn already deep in the search; if not, much of the work still helps. It runs in short slices so your move is never kept waiting, and stops after 45 seconds or when the tab is hidden.
 
 ## How it plays
 
 * **Sacrifices, and plans them:** a sacrifice aimed at your king gets a bonus of about 2.2 pawns, and it may play one when the line looks up to about 2.6 pawns worse. The bonus also applies to its next move (and at half strength to the move after), so it steers towards positions where a sacrifice will be available.
 * **Attacks:** a Stockfish-style king-danger model that grows quadratically with the attackers, safe checks and holes around your king. Aggression (220%) multiplies the danger it creates against *your* king, not how it judges its own. Pieces get credit for aiming at your king early, and rooks and queens for open files next to it.
-* **Hates trades:** every trade costs it a little, and swapping queens costs it a lot.
 * **Forcing moves first:** when moves are close, it prefers checks, captures and moves into your king zone.
 * **Avoids draws:** contempt 50, so it treats a draw as a small loss and plays on.
 * **Finishes beautifully:** with a forced mate, it prefers a mate that starts with a sacrifice (a queen sac above all) if that still mates within two moves of the fastest one. Instead of a plain Re8#, you get Qd8+! Bxd8 Re8#.
-* **Swindles when worse** (new in v3.3, see above).
+* **Swindles when worse:** when it's between about 1.5 and 25 pawns down, it looks at its best move plus up to five that are nearly as good, checks every reply you could make to each, and plays the one where most of your natural replies (captures and checks count extra) would throw your advantage away. Turn it off with the `Swindle` UCI option for engine-vs-engine matches.
+* **Keeps pieces on:** every trade costs it, queen trades a lot, and more again when it's behind.
 
 ### Opening book
 
-About 200 hand-picked lines covering both colours, all built in (no file needed):
+About 300 hand-picked lines covering both colours, all built in (no file needed):
 
-* **White:** King's Gambit, Evans Gambit, Danish Gambit, Scotch Gambit, Fried Liver, Smith-Morra, Vienna Gambit, Blackmar-Diemer, Milner-Barry (vs the French), Alekhine-Chatard, Staunton Gambit (vs the Dutch) and the Tennison Gambit, plus sharp English lines after 1.c4.
-* **Black:** the three-pawn Scandinavian (1.e4 d5 2.exd5 c6 3.dxc6 Nf6 4.cxb7 Bxb7), Stafford, Traxler, Schliemann, Albin Counter-Gambit (with the Lasker trap), Benko, Budapest and From's Gambit, plus answers to 1.c4, 1.Nf3, 1.f4, 1.b3, 1.g3, 1.b4 and other offbeat first moves.
+* **White:** King's Gambit, Evans Gambit, Danish Gambit, Scotch Gambit, Fried Liver, Smith-Morra, Vienna Gambit, Blackmar-Diemer, Milner-Barry (vs the French), Alekhine-Chatard, Staunton Gambit (vs the Dutch), the Tennison Gambit and the Halloween Gambit, plus sharp English lines after 1.c4.
+* **Black:** the three-pawn Scandinavian (1.e4 d5 2.exd5 c6 3.dxc6 Nf6 4.cxb7 Bxb7), Stafford, Traxler, Schliemann, Latvian Gambit, Albin Counter-Gambit (with the Lasker trap), Englund Gambit, Benko, Budapest and From's Gambit, plus answers to 1.c4, 1.Nf3, 1.f4, 1.b3, 1.g3, 1.b4 and other offbeat first moves.
 
-Every line is checked for legality by a test, and every book move was screened with a neutral analysis to remove real blunders. The gambits stay in.
+Every line is checked for legality by a test, and every book move was screened with a neutral analysis to remove real blunders. The gambits stay in. Lines that let the queens come off early were changed to keep them on.
 
 ### Strength
 
