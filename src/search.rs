@@ -26,9 +26,9 @@ pub static NUM_THREADS: AtomicUsize = AtomicUsize::new(1);
 pub static CONTEMPT: AtomicI32 = AtomicI32::new(50);
 /// 0..=20. 20 = full strength. Lower levels limit nodes and add evaluation noise.
 /// Root bonus (centipawns) for moves that give up material. 0 = off.
-pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(220);
+pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(270);
 /// A sacrifice only gets the bonus if its line scores at least this much.
-const SAC_FLOOR: i32 = -260;
+const SAC_FLOOR: i32 = -310;
 pub static SKILL: AtomicI32 = AtomicI32::new(20);
 
 // ---------------------------------------------------------------------------
@@ -1004,6 +1004,14 @@ impl Searcher {
                         && piece_attacks(piece, stm, m.to, child.occupied().0) & ezone != 0))
                 && !see_ge(board, m, -90)
             {
+                sac_bonus
+            } else if sac_bonus > 0
+                && piece == Piece::Rook
+                && matches!(board.piece_on(m.to), Some(Piece::Knight) | Some(Piece::Bishop))
+                && !see_ge(board, m, -90)
+            {
+                // exchange sacrifice (Rxf6!, Rxc3!): a rook for a minor piece to wreck the
+                // pawns or open lines, even when it isn't aimed straight at the king
                 sac_bonus
             } else if root && sac_bonus > 0 && (gives_check || attacks_zone || capture) {
                 12 // forcing tie-break: among near-equal moves prefer the forcing one

@@ -675,7 +675,7 @@ mod queen_trades {
                         break;
                     }
                     let ours = board.side_to_move() == mine;
-                    let (a, sb, c) = if ours { (220, 220, 50) } else { (100, 0, 0) };
+                    let (a, sb, c) = if ours { (220, 270, 50) } else { (100, 0, 0) };
                     eval::AGGRESSION.store(a, Ordering::Relaxed);
                     search::SACRIFICE_BONUS.store(sb, Ordering::Relaxed);
                     search::CONTEMPT.store(c, Ordering::Relaxed);
@@ -701,7 +701,7 @@ mod queen_trades {
             }
         }
         eval::AGGRESSION.store(220, Ordering::Relaxed);
-        search::SACRIFICE_BONUS.store(220, Ordering::Relaxed);
+        search::SACRIFICE_BONUS.store(270, Ordering::Relaxed);
         search::CONTEMPT.store(50, Ordering::Relaxed);
         std::fs::write("/tmp/queen_trades.txt", &out).unwrap();
         eprintln!("{}", out);

@@ -1,4 +1,4 @@
-# AggroChess v3.4.0 ⚔️
+# AggroChess v3.5.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
@@ -6,48 +6,37 @@
 
 **Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
 
-## v3.4 vs v3.3
+## v3.5 vs v3.4
 
-v3.4 keeps pieces on the board. v3.3 traded too easily, and one of its opening lines even handed the opponent a queenless game on move 7. A Tal-style engine wants the opposite: the more pieces on the board, the more chances a human has to go wrong.
+v3.4 made AggroChess keep its pieces on the board, and it got much stronger (+100 Elo over v3.3). v3.5 spends some of that strength on more sacrifices.
 
-| | v3.3 | v3.4 |
+| | v3.4 | v3.5 |
 |---|---|---|
-| **Trades** | Each trade cost it about 0.12 pawns | **About 0.24 pawns** per trade (0.38 when it's behind) |
-| **Queen trades** | Cost about 0.7 pawns | **About 1.4 pawns** (2.2 when it's behind) |
-| **When behind in material** | Traded like in any other position | **Avoids trades all the way into the endgame**, to keep swindling chances |
-| **Opening book** | A few lines led to early queen trades (e.g. the Urusov: 6...Qe7+ 7.Qe2 and the queens come off on move 7) | Those lines now keep the queens on |
-| **New gambits** | – | **Halloween**, **Latvian** and **Englund** gambits |
-| **Thinking on your time (website)** | No | **Yes** (pondering) |
-| **Sacrifice sound (website)** | Played a sound, which gave the trap away | **Silent** |
-| Personality, swindle mode, "finish beautifully" mates | Aggression 220, Sacrifice 220, Contempt 50 | Same |
-| **Head-to-head (50 games)** | 36% | **64%, about +100 Elo** (error bars +13 to +201) |
-| Sacrifices per game in that match | 2.14 | 1.64 |
-
-### New gambits
-
-Objectively dubious, but they set real problems for anyone who doesn't know them. Each comes up in roughly one game in five or six where it's possible.
-
-* **Halloween Gambit** (White): 1.e4 e5 2.Nf3 Nc6 3.Nc3 Nf6 4.Nxe5!?, a whole knight for a pawn and a big centre.
-* **Latvian Gambit** (Black): 1.e4 e5 2.Nf3 f5!?, the wildest reply to 2.Nf3.
-* **Englund Gambit** (Black): 1.d4 e5!?, including the famous trap 7.Qd2?? Bxc3 8.Qxc3 Qc1#.
+| **Sacrifice bonus** | 2.2 pawns | **2.7 pawns** |
+| **How bad a sacrifice may look** | Up to 2.6 pawns worse | **Up to 3.1 pawns worse** |
+| **Exchange sacrifices** (a rook for a knight or bishop, Rxf6!) | Only got the bonus when aimed at the king | **Always get the bonus** |
+| **What counts as a trade** | Any piece leaving the board, so its own sacrifices were taxed as trades | **Only matched losses** (a bishop for a bishop); a sacrifice costs nothing extra |
+| **Queen sacrifices** | Counted as "queens off the board" and penalised | **Only a real queen trade is penalised** |
+| Trade aversion, swindle mode, "finish beautifully", opening book | | Same |
+| **Sacrifices per game** (100-game match) | 1.86 | **2.08** |
+| **Games with a sacrifice** | 87 / 100 | **95 / 100** |
+| **Head-to-head (100 games)** | 54.5% | 45.5%, about −31 Elo (error bars −91 to +27) |
 
 ### The match
 
-50 games, v3.4 against v3.3, 10 s + 0.1 s per game, 25 balanced openings played from both sides: **28 wins, 8 draws, 14 losses (64%)**. Keeping pieces on made it both more dangerous and stronger. It sacrificed a bit less often in this match.
+100 games, v3.5 against v3.4, 10 s + 0.1 s per game, 50 balanced openings played from both sides: **32 wins, 27 draws, 41 losses (45.5%)**. That is within the margin of error, so v3.5 may be slightly weaker than v3.4, but it should still be well ahead of v3.3. In return it sacrifices about 12% more often and finds a sacrifice in 95 games out of 100.
 
-### Pondering (website)
-
-While you think, AggroChess guesses your reply from its own analysis and keeps searching the position after it. If you play the move it expected, it starts its turn already deep in the search; if not, much of the work still helps. It runs in short slices so your move is never kept waiting, and stops after 45 seconds or when the tab is hidden.
+Most sacrifices still come early (over half in the first 15 moves, many from the gambits). Exchange sacrifices are rare because the chance to give a rook for a minor piece doesn't come up often.
 
 ## How it plays
 
-* **Sacrifices, and plans them:** a sacrifice aimed at your king gets a bonus of about 2.2 pawns, and it may play one when the line looks up to about 2.6 pawns worse. The bonus also applies to its next move (and at half strength to the move after), so it steers towards positions where a sacrifice will be available.
+* **Sacrifices, and plans them:** a sacrifice aimed at your king (or any exchange sacrifice, a rook for a knight or bishop) gets a bonus of about 2.7 pawns, and it may play one when the line looks up to about 3.1 pawns worse. The bonus also applies to its next move (and at half strength to the move after), so it steers towards positions where a sacrifice will be available.
 * **Attacks:** a Stockfish-style king-danger model that grows quadratically with the attackers, safe checks and holes around your king. Aggression (220%) multiplies the danger it creates against *your* king, not how it judges its own. Pieces get credit for aiming at your king early, and rooks and queens for open files next to it.
 * **Forcing moves first:** when moves are close, it prefers checks, captures and moves into your king zone.
 * **Avoids draws:** contempt 50, so it treats a draw as a small loss and plays on.
 * **Finishes beautifully:** with a forced mate, it prefers a mate that starts with a sacrifice (a queen sac above all) if that still mates within two moves of the fastest one. Instead of a plain Re8#, you get Qd8+! Bxd8 Re8#.
 * **Swindles when worse:** when it's between about 1.5 and 25 pawns down, it looks at its best move plus up to five that are nearly as good, checks every reply you could make to each, and plays the one where most of your natural replies (captures and checks count extra) would throw your advantage away. Turn it off with the `Swindle` UCI option for engine-vs-engine matches.
-* **Keeps pieces on:** every trade costs it, queen trades a lot, and more again when it's behind.
+* **Keeps pieces on:** every trade costs it, queen trades a lot, and more again when it's behind. Only real trades count: a sacrifice is not a trade.
 
 ### Opening book
 
@@ -60,7 +49,7 @@ Every line is checked for legality by a test, and every book move was screened w
 
 ### Strength
 
-AggroChess is deliberately weaker than it could be: its speculative sacrifices cost it about 215 Elo against its calmer v3.0 self. It is still far stronger than most human players. When it plays a sacrifice, the score it reports includes the sacrifice bonus, so it can look a bit more optimistic than it is for that move.
+AggroChess is deliberately weaker than it could be: its speculative sacrifices make it weaker than a calmer version of itself would be. It is still far stronger than most human players. When it plays a sacrifice, the score it reports includes the sacrifice bonus, so it can look a bit more optimistic than it is for that move.
 
 ## Under the hood
 
@@ -69,7 +58,7 @@ AggroChess is deliberately weaker than it could be: its speculative sacrifices c
 
 ## UCI options
 
-Only three settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 220, Contempt 50, 128 MB hash, 50 ms move overhead.
+Only three settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 270, Contempt 50, 128 MB hash, 50 ms move overhead.
 
 | Option | Default | What it does |
 |---|---|---|

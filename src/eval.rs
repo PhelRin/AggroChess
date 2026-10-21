@@ -663,9 +663,6 @@ pub fn evaluate(board: &Board) -> i32 {
     if let Some(e) = engine.filter(|_| aggression > 100) {
         let ec = idx(e);
         let k = aggression - 100; // 80 at the default setting
-        let pieces_on_board =
-            (queens_all | x.pcs[0][1] | x.pcs[1][1] | x.pcs[0][2] | x.pcs[1][2] | x.pcs[0][3] | x.pcs[1][3])
-                .count_ones() as i32;
         // Prefer complex positions: every trade costs (zero at the start). Against a human,
         // pieces on the board mean chances, so this is strong, and stronger still when the
         // engine is behind in material: a losing swindler wants as many pieces on as possible,
@@ -677,15 +674,19 @@ pub fn evaluate(board: &Board) -> i32 {
                 + 9 * x.pcs[c][4].count_ones() as i32
         };
         let behind = mat(ec) < mat(1 - ec) - 1;
-        let gone = pieces_on_board - 14; // zero or negative
+        // Only *matched* losses count as trades: a bishop for a bishop is a trade, a bishop for
+        // nothing is a sacrifice and costs nothing here (the sacrifice has its own risk already).
+        let pieces = |c: usize| (x.pcs[c][1] | x.pcs[c][2] | x.pcs[c][3] | x.pcs[c][4]).count_ones() as i32;
+        let lost = |c: usize| (7 - pieces(c)).max(0);
+        let gone = -2 * lost(0).min(lost(1)); // two pieces leave the board per trade
         if behind {
             x.mg[ec] += gone * 16 * k / 50;
             x.eg[ec] += gone * 6 * k / 50;
         } else {
             x.mg[ec] += gone * 10 * k / 50;
         }
-        if x.pcs[0][4] == 0 || x.pcs[1][4] == 0 {
-            // queens off the board: much less fun
+        if x.pcs[0][4] == 0 && x.pcs[1][4] == 0 {
+            // queens traded off: much less fun (a queen *sacrifice* is not a trade)
             x.mg[ec] -= if behind { 90 } else { 60 } * k / 50;
         }
         // Reward simply *pointing* pieces at the enemy king, even before the attack is
