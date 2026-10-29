@@ -419,11 +419,54 @@ struct Ctx {
     eg: [i32; 2],
 }
 
-/// Evaluate from the side to move's point of view (centipawns).
+/// Evaluate from the side to move's point of view (centipawns): classical evaluation plus
+/// the personality layer (and Skill Level noise).
 pub fn evaluate(board: &Board) -> i32 {
-    if is_insufficient_material(board) {
+    let (hce, pers) = compute(board, true);
+    hce + pers + noise(board)
+}
+
+/// Whether the personality layer is active (an engine side is set and aggression > 100).
+#[inline]
+pub fn personality_active() -> bool {
+    engine_color().is_some() && AGGRESSION.load(Ordering::Relaxed) > 100
+}
+
+/// Just the personality layer, from the side to move's point of view: the extra king danger
+/// the engine inflicts beyond the objective amount, trade aversion, pieces aimed at the king.
+/// Added on top of the NNUE evaluation.
+pub fn personality(board: &Board) -> i32 {
+    if !personality_active() {
         return 0;
     }
+    compute(board, false).1
+}
+
+/// Skill Level noise (zero at full strength).
+#[inline]
+pub fn noise(board: &Board) -> i32 {
+    let noise = NOISE.load(Ordering::Relaxed);
+    if noise > 0 {
+        // deterministic per position within one search, so the hash table stays consistent
+        let mut h = board.hash() ^ NOISE_SEED.load(Ordering::Relaxed);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        (h % (2 * noise as u64 + 1)) as i32 - noise
+    } else {
+        0
+    }
+}
+
+/// (classical evaluation, personality layer), both from the side to move's point of view.
+/// With `full` false only the personality layer is computed (the first value is then junk).
+fn compute(board: &Board, full: bool) -> (i32, i32) {
+    if is_insufficient_material(board) {
+        return (0, 0);
+    }
+    // personality terms, kept apart from the objective ones
+    let mut pmg = [0i32; 2];
+    let mut peg = [0i32; 2];
 
     let mut x = Ctx {
         occ: board.occupied().0,
@@ -524,22 +567,24 @@ pub fn evaluate(board: &Board) -> i32 {
                 x.att_all[c] |= a;
                 x.att[c][pi] |= a;
 
-                // material + PST
-                let i = pst_index(color, s as usize);
-                x.mg[c] += MG_VALUE[pi] + MG_PST[pi][i];
-                x.eg[c] += EG_VALUE[pi] + EG_PST[pi][i];
                 phase += PHASE_INC[pi];
+                if full {
+                    // material + PST
+                    let i = pst_index(color, s as usize);
+                    x.mg[c] += MG_VALUE[pi] + MG_PST[pi][i];
+                    x.eg[c] += EG_VALUE[pi] + EG_PST[pi][i];
 
-                // mobility
-                let mob = (a & mob_area).count_ones() as i32;
-                let (mm, me) = match p {
-                    Piece::Knight => ((mob - 4) * 4, (mob - 4) * 4),
-                    Piece::Bishop => ((mob - 6) * 5, (mob - 6) * 5),
-                    Piece::Rook => ((mob - 7) * 2, (mob - 7) * 4),
-                    _ => (mob - 13, (mob - 13) * 2),
-                };
-                x.mg[c] += mm;
-                x.eg[c] += me;
+                    // mobility
+                    let mob = (a & mob_area).count_ones() as i32;
+                    let (mm, me) = match p {
+                        Piece::Knight => ((mob - 4) * 4, (mob - 4) * 4),
+                        Piece::Bishop => ((mob - 6) * 5, (mob - 6) * 5),
+                        Piece::Rook => ((mob - 7) * 2, (mob - 7) * 4),
+                        _ => (mob - 13, (mob - 13) * 2),
+                    };
+                    x.mg[c] += mm;
+                    x.eg[c] += me;
+                }
 
                 // king attack
                 if a & x.zone[them] != 0 {
@@ -549,6 +594,9 @@ pub fn evaluate(board: &Board) -> i32 {
                 }
 
                 let b = 1u64 << s;
+                if !full {
+                    continue;
+                }
                 match p {
                     Piece::Knight | Piece::Bishop => {
                         let rr = rel_rank(color, s);
@@ -587,8 +635,11 @@ pub fn evaluate(board: &Board) -> i32 {
     }
 
     // --- pawn structure ---------------------------------------------------
-    let pe = pawn_structure(x.pcs[0][0], x.pcs[1][0]);
+    let pe = if full { pawn_structure(x.pcs[0][0], x.pcs[1][0]) } else { PawnEntry::default() };
     for color in [Color::White, Color::Black] {
+        if !full {
+            break;
+        }
         let c = idx(color);
         let them = 1 - c;
         x.mg[c] += pe.mg[c];
@@ -623,6 +674,9 @@ pub fn evaluate(board: &Board) -> i32 {
 
     // --- threats ----------------------------------------------------------
     for color in [Color::White, Color::Black] {
+        if !full {
+            break;
+        }
         let c = idx(color);
         let them = 1 - c;
         let their_nonpawn = x.colors[them] & !x.pcs[them][0] & !x.pcs[them][5];
@@ -649,11 +703,13 @@ pub fn evaluate(board: &Board) -> i32 {
     let engine = engine_color();
     let aggression = AGGRESSION.load(Ordering::Relaxed).clamp(0, 400);
     for color in [Color::White, Color::Black] {
+        if !full && Some(!color) != engine {
+            continue; // only the engine's attack matters for the personality
+        }
         let (mg_pen, eg_pen) = king_danger(&x, color);
-        let mut mg_pen = mg_pen;
         if Some(!color) == engine {
             // The engine is the attacker here: value its attack more.
-            mg_pen = mg_pen * aggression / 100;
+            pmg[idx(color)] -= mg_pen * aggression / 100 - mg_pen;
         }
         x.mg[idx(color)] -= mg_pen;
         x.eg[idx(color)] -= eg_pen;
@@ -680,27 +736,27 @@ pub fn evaluate(board: &Board) -> i32 {
         let lost = |c: usize| (7 - pieces(c)).max(0);
         let gone = -2 * lost(0).min(lost(1)); // two pieces leave the board per trade
         if behind {
-            x.mg[ec] += gone * 16 * k / 50;
-            x.eg[ec] += gone * 6 * k / 50;
+            pmg[ec] += gone * 16 * k / 50;
+            peg[ec] += gone * 6 * k / 50;
         } else {
-            x.mg[ec] += gone * 10 * k / 50;
+            pmg[ec] += gone * 10 * k / 50;
         }
         if x.pcs[0][4] == 0 && x.pcs[1][4] == 0 {
             // queens traded off: much less fun (a queen *sacrifice* is not a trade)
-            x.mg[ec] -= if behind { 90 } else { 60 } * k / 50;
+            pmg[ec] -= if behind { 90 } else { 60 } * k / 50;
         }
         // Reward simply *pointing* pieces at the enemy king, even before the attack is
         // strong enough to register as king danger: it pulls pieces towards the king.
         let oc = 1 - ec;
         let zone_hits = (x.zone[oc] & x.att_all[ec]).count_ones() as i32;
-        x.mg[ec] += (x.ka_count[ec] * 9 + zone_hits * 4) * k / 80;
+        pmg[ec] += (x.ka_count[ec] * 9 + zone_hits * 4) * k / 80;
         // Rooks and queens on open or half-open files next to the enemy king.
         let kf = (x.ksq[oc] % 8) as i32;
         for f in (kf - 1).max(0)..=(kf + 1).min(7) {
             let file_bb = FILE_A << f;
             if x.pcs[ec][0] & file_bb == 0 {
                 let heavy = ((x.pcs[ec][3] | x.pcs[ec][4]) & file_bb).count_ones() as i32;
-                x.mg[ec] += heavy * 18 * k / 80;
+                pmg[ec] += heavy * 18 * k / 80;
             }
         }
     }
@@ -734,20 +790,15 @@ pub fn evaluate(board: &Board) -> i32 {
         }
     }
 
-    let sf = scale_factor(board, &x, eg);
+    let sf = if full { scale_factor(board, &x, eg) } else { 64 };
     let score = (mg * phase + eg * sf / 64 * (24 - phase)) / 24;
+    let pers = ((pmg[0] - pmg[1]) * phase + (peg[0] - peg[1]) * (24 - phase)) / 24;
 
-    let mut score = if board.side_to_move() == Color::White { score } else { -score };
-    let noise = NOISE.load(Ordering::Relaxed);
-    if noise > 0 {
-        // deterministic per position within one search, so the hash table stays consistent
-        let mut h = board.hash() ^ NOISE_SEED.load(Ordering::Relaxed);
-        h ^= h >> 33;
-        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-        h ^= h >> 33;
-        score += (h % (2 * noise as u64 + 1)) as i32 - noise;
+    if board.side_to_move() == Color::White {
+        (score, pers)
+    } else {
+        (-score, -pers)
     }
-    score
 }
 
 /// Returns (mg penalty, eg penalty) for the king of `us`.
@@ -884,4 +935,38 @@ pub fn king_zone(board: &Board, defender: Color) -> u64 {
     let k = board.king(defender);
     let ring = cozy_chess::get_king_moves(k).0 | k.bitboard().0;
     ring | forward(ring, defender)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The lean personality-only path must give exactly the same personality score as the
+    /// full evaluation.
+    #[test]
+    fn lean_personality_matches_full() {
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        for side in [Color::White, Color::Black] {
+            set_engine_color(Some(side));
+            for _game in 0..100 {
+                let mut b = Board::default();
+                for _ in 0..120 {
+                    let mut moves = Vec::new();
+                    b.generate_moves(|m| {
+                        moves.extend(m);
+                        false
+                    });
+                    if moves.is_empty() {
+                        break;
+                    }
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    b.play_unchecked(moves[(seed % moves.len() as u64) as usize]);
+                    assert_eq!(compute(&b, true).1, compute(&b, false).1, "{}", b);
+                }
+            }
+        }
+        set_engine_color(None);
+    }
 }
