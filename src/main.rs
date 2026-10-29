@@ -252,6 +252,14 @@ mod tests {
     }
 
     #[test]
+    fn no_cheap_pawn_sacrifice_in_the_albin() {
+        // 1.d4 d5 2.c4 e5 3.dxe5 d4 4.Nf3 Nc6 5.a3 Be6 6.Qb3: 6...d3? only "attacks" e2 and loses
+        // about three pawns; a single pawn must not earn the sacrifice bonus (v4.0 played it)
+        let (mv, _) = best("r2qkbnr/ppp2ppp/2n1b3/4P3/2Pp4/PQ3N2/1P2PPPP/RNB1KB1R b KQkq - 2 6", 30, 2000);
+        assert_ne!(mv, "d4d3");
+    }
+
+    #[test]
     fn does_not_hang_knight() {
         // 1. e4 c6 2. Nf3 d5 3. d4 dxe4: the f3 knight is attacked and must move.
         let (mv, _) = best("rnbqkbnr/pp2pppp/2p5/8/3Pp3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4", 30, 2000);
