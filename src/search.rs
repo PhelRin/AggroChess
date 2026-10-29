@@ -10,6 +10,7 @@
 //! * Draws are scored with contempt from the engine's point of view.
 
 use crate::eval::{self, SEE_VALUE};
+use crate::nnue::Accumulator;
 use cozy_chess::{BitBoard, Board, Color, Move, Piece, Square};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -26,10 +27,12 @@ pub static NUM_THREADS: AtomicUsize = AtomicUsize::new(1);
 pub static CONTEMPT: AtomicI32 = AtomicI32::new(50);
 /// 0..=20. 20 = full strength. Lower levels limit nodes and add evaluation noise.
 /// Root bonus (centipawns) for moves that give up material. 0 = off.
-pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(270);
+pub static SACRIFICE_BONUS: AtomicI32 = AtomicI32::new(300);
 /// A sacrifice only gets the bonus if its line scores at least this much.
-const SAC_FLOOR: i32 = -310;
+pub static SAC_FLOOR: AtomicI32 = AtomicI32::new(-310);
 pub static SKILL: AtomicI32 = AtomicI32::new(20);
+/// Evaluate with the NNUE (plus the personality layer) instead of the classical evaluation.
+pub static USE_NNUE: AtomicBool = AtomicBool::new(true);
 
 // ---------------------------------------------------------------------------
 // Transposition table
@@ -408,6 +411,98 @@ pub fn see(board: &Board, mv: Move) -> i32 {
     lo
 }
 
+/// The sacrifice settings for one search.
+#[derive(Clone, Copy, Debug)]
+pub struct SacParams {
+    pub bonus: i32,
+    pub floor: i32,
+    pub units: i32,
+    /// any material sacrifice gets (half) the bonus, not only ones aimed at the king
+    pub any: bool,
+}
+
+impl SacParams {
+    pub fn base() -> Self {
+        SacParams {
+            bonus: SACRIFICE_BONUS.load(Ordering::Relaxed),
+            floor: SAC_FLOOR.load(Ordering::Relaxed),
+            units: SAC_FULL_UNITS.load(Ordering::Relaxed),
+            any: false,
+        }
+    }
+}
+
+/// Sacrifices AggroChess has already made in the current game, by colour (worked out from the
+/// game's moves by the UCI layer, with the same rule the match statistics use).
+pub static GAME_SACS: [AtomicI32; 2] = [AtomicI32::new(0), AtomicI32::new(0)];
+/// Score of the engine's previous search in this game (its own point of view).
+pub static LAST_SCORE: AtomicI32 = AtomicI32::new(0);
+/// Every game should have a sacrifice: until AggroChess has made one, its appetite grows with
+/// every move, and faster when the game is already decided.
+pub static SAC_PRESSURE: AtomicBool = AtomicBool::new(true);
+/// Pressure tuning: the move it starts at, and growth per move.
+pub static PRESSURE_START: AtomicI32 = AtomicI32::new(22);
+pub static PRESSURE_STEP: AtomicI32 = AtomicI32::new(15);
+
+/// Sacrifice settings for a search from `board` (AggroChess to move).
+pub fn sac_params_for(board: &Board) -> SacParams {
+    let mut p = SacParams::base();
+    if p.bonus <= 0 || !SAC_PRESSURE.load(Ordering::Relaxed) {
+        return p;
+    }
+    if GAME_SACS[board.side_to_move() as usize].load(Ordering::Relaxed) > 0 {
+        return p;
+    }
+    let moves = board.fullmove_number() as i32 - PRESSURE_START.load(Ordering::Relaxed);
+    let last = LAST_SCORE.load(Ordering::Relaxed).abs();
+    // a decided game ends soon (and a sacrifice costs little there): hurry
+    let decided = if last >= 600 { 30 } else if last >= 300 { 12 } else { 0 };
+    let t = (moves.max(0) + decided).min(30);
+    if t == 0 {
+        return p;
+    }
+    let step = PRESSURE_STEP.load(Ordering::Relaxed);
+    p.bonus += step * t;
+    p.floor -= step * t * 2 / 3;
+    // when already well behind, every line scores below the usual floor: measure from where we are
+    let own = LAST_SCORE.load(Ordering::Relaxed);
+    if own < 0 {
+        p.floor = p.floor.min(own - 250);
+    }
+    if t >= 6 {
+        p.units = p.units.min(2);
+    }
+    if t >= 12 {
+        p.units = 1;
+        p.any = true;
+    }
+    p
+}
+
+/// Attack units (knight/bishop/rook 1, queen 2) aimed at the king for the full sacrifice bonus.
+pub static SAC_FULL_UNITS: AtomicI32 = AtomicI32::new(3);
+
+/// Search sacrifice candidates at the root one ply deeper.
+pub static SAC_VERIFY: AtomicBool = AtomicBool::new(false);
+
+/// Whether the sacrifice bonus is scaled by the attack the sacrifice brings.
+pub static SAC_NEEDS_ATTACK: AtomicBool = AtomicBool::new(true);
+
+/// Attack units `us` has aimed at the enemy king zone `ezone` on `board`: knights, bishops and
+/// rooks count 1, queens 2.
+fn attack_units(board: &Board, us: Color, ezone: u64) -> u32 {
+    let occ = board.occupied().0;
+    let mut units = 0;
+    for p in [Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen] {
+        for sq in board.colored_pieces(us, p) {
+            if piece_attacks(p, us, sq, occ) & ezone != 0 {
+                units += if p == Piece::Queen { 2 } else { 1 };
+            }
+        }
+    }
+    units
+}
+
 /// Squares attacked by a piece of type `p` standing on `s`.
 #[inline]
 fn piece_attacks(p: Piece, color: Color, s: Square, occ: u64) -> u64 {
@@ -498,6 +593,10 @@ pub struct Searcher {
     root_depth: i32,
     pub seldepth: usize,
     lmr: Box<[[i32; 64]; 64]>,
+    acc: Vec<Accumulator>,
+    acc_key: Vec<u64>,
+    nnue: bool,
+    sac: SacParams,
 }
 
 #[inline]
@@ -535,6 +634,59 @@ impl Searcher {
             root_depth: 0,
             seldepth: 0,
             lmr,
+            acc: vec![Accumulator::default(); MAX_PLY + 8],
+            acc_key: vec![0; MAX_PLY + 8],
+            nnue: USE_NNUE.load(Ordering::Relaxed),
+            sac: SacParams::base(),
+        }
+    }
+
+    /// Make sure the accumulator for `ply` matches `board` (refresh it from scratch if not).
+    #[inline]
+    fn ensure_acc(&mut self, board: &Board, ply: usize) {
+        if self.nnue && self.acc_key[ply] != board.hash() {
+            self.acc[ply].refresh(board);
+            self.acc_key[ply] = board.hash();
+        }
+    }
+
+    /// Build the child's accumulator incrementally from the parent's.
+    #[inline]
+    fn push_acc(&mut self, board: &Board, m: Move, child: &Board, ply: usize) {
+        if self.nnue && self.acc_key[ply] == board.hash() {
+            let (lo, hi) = self.acc.split_at_mut(ply + 1);
+            hi[0].v = lo[ply].v;
+            hi[0].apply(board, m);
+            self.acc_key[ply + 1] = child.hash();
+        }
+    }
+
+    /// Static evaluation from the side to move's point of view.
+    #[inline]
+    fn static_eval(&mut self, board: &Board, ply: usize) -> i32 {
+        if self.nnue {
+            if eval::is_insufficient_material(board) {
+                return 0;
+            }
+            // Against a bare king the net has no idea how to drive it into a corner (it hardly
+            // ever saw such positions in training); the classical evaluation's mop-up does.
+            // The same goes for other sparse endgames without pawns (5 pieces or fewer, kings
+            // included, like queen against rook): the net saw few of them, the classical
+            // evaluation handles them well. Pawn endgames stay with the net.
+            let w = board.colors(Color::White);
+            let b = board.colors(Color::Black);
+            if w.len() == 1
+                || b.len() == 1
+                || (board.occupied().len() <= 5 && board.pieces(Piece::Pawn).is_empty())
+            {
+                return eval::evaluate(board);
+            }
+            self.ensure_acc(board, ply);
+            let v = self.acc[ply].evaluate(board) + eval::personality(board) + eval::noise(board);
+            // a static evaluation must never look like a mate score
+            v.clamp(-(MATE_BOUND - 2000), MATE_BOUND - 2000)
+        } else {
+            eval::evaluate(board)
         }
     }
 
@@ -740,6 +892,7 @@ impl Searcher {
         if ply > self.seldepth {
             self.seldepth = ply;
         }
+        self.ensure_acc(board, ply);
 
         if !root {
             if self.stop.load(Ordering::Relaxed) {
@@ -749,7 +902,7 @@ impl Searcher {
                 return self.draw_score(board);
             }
             if ply >= MAX_PLY - 2 {
-                return if in_check { 0 } else { eval::evaluate(board) };
+                return if in_check { 0 } else { self.static_eval(board, ply) };
             }
             // mate distance pruning
             alpha = alpha.max(-MATE + ply as i32);
@@ -788,7 +941,7 @@ impl Searcher {
         } else {
             static_eval = match tt {
                 Some(e) if e.eval != EVAL_NONE => e.eval,
-                _ => eval::evaluate(board),
+                _ => self.static_eval(board, ply),
             };
             eval_est = static_eval;
             if let Some(e) = tt {
@@ -843,6 +996,11 @@ impl Searcher {
                     self.stack[ply].mv = None;
                     self.stack[ply].cont = NO_CONT;
                     self.hashes.push(hash);
+                    if self.nnue && self.acc_key[ply] == hash {
+                        let (lo, hi) = self.acc.split_at_mut(ply + 1);
+                        hi[0].v = lo[ply].v;
+                        self.acc_key[ply + 1] = nb.hash();
+                    }
                     let s = -self.search(&nb, depth - r, -beta, -beta + 1, ply + 1, !cut_node);
                     self.hashes.pop();
                     if self.stop.load(Ordering::Relaxed) {
@@ -879,11 +1037,11 @@ impl Searcher {
         // Sacrifice appetite: full at the root, 60% on the engine's next move, so it also
         // steers towards positions where a sacrifice will be available.
         let sac_bonus = if root {
-            SACRIFICE_BONUS.load(Ordering::Relaxed)
+            self.sac.bonus
         } else if ply == 2 && stm == self.root_color {
-            SACRIFICE_BONUS.load(Ordering::Relaxed)
+            self.sac.bonus
         } else if ply == 4 && stm == self.root_color {
-            SACRIFICE_BONUS.load(Ordering::Relaxed) / 2
+            self.sac.bonus / 2
         } else {
             0
         };
@@ -988,6 +1146,7 @@ impl Searcher {
                 ext = 1;
             }
             let new_depth = depth - 1 + ext;
+            self.push_acc(board, m, &child, ply);
             self.stack[ply].mv = Some(m);
             self.stack[ply].cont = pc12(stm, piece) * 64 + m.to as usize;
             self.hashes.push(hash);
@@ -1004,7 +1163,21 @@ impl Searcher {
                         && piece_attacks(piece, stm, m.to, child.occupied().0) & ezone != 0))
                 && !see_ge(board, m, -90)
             {
-                sac_bonus
+                if SAC_NEEDS_ATTACK.load(Ordering::Relaxed) {
+                    // Scale the bonus by how much attack the sacrifice brings: a sacrifice with
+                    // several pieces aimed at the king is a real attack, a lone piece is a spite sac.
+                    let units = attack_units(&child, stm, ezone) as i32;
+                    let full = self.sac.units;
+                    if units >= full {
+                        sac_bonus
+                    } else if units == full - 1 {
+                        sac_bonus * 3 / 5
+                    } else {
+                        sac_bonus / 4
+                    }
+                } else {
+                    sac_bonus
+                }
             } else if sac_bonus > 0
                 && piece == Piece::Rook
                 && matches!(board.piece_on(m.to), Some(Piece::Knight) | Some(Piece::Bishop))
@@ -1013,11 +1186,16 @@ impl Searcher {
                 // exchange sacrifice (Rxf6!, Rxc3!): a rook for a minor piece to wreck the
                 // pawns or open lines, even when it isn't aimed straight at the king
                 sac_bonus
+            } else if sac_bonus > 0 && self.sac.any && piece != Piece::King && !see_ge(board, m, -150) {
+                // under sacrifice pressure, any real material sacrifice counts (at a discount)
+                sac_bonus / 2
             } else if root && sac_bonus > 0 && (gives_check || attacks_zone || capture) {
                 12 // forcing tie-break: among near-equal moves prefer the forcing one
             } else {
                 0
             };
+            // verify sacrifice candidates at the root one ply deeper before trusting them
+            let new_depth = if root && sb > 12 && SAC_VERIFY.load(Ordering::Relaxed) { new_depth + 1 } else { new_depth };
             let (wa, wb) = (alpha - sb, beta - sb); // search window for this move
             let mut score;
             if depth >= 3 && move_count > 1 + root as usize && (quiet || !see_ge(board, m, 0)) {
@@ -1058,7 +1236,7 @@ impl Searcher {
             }
             self.hashes.pop();
             if sb != 0 {
-                if score >= SAC_FLOOR && score.abs() < MATE_BOUND {
+                if score >= self.sac.floor && score.abs() < MATE_BOUND {
                     score += sb;
                 }
             }
@@ -1142,8 +1320,9 @@ impl Searcher {
         }
         let in_check = !board.checkers().is_empty();
         if ply >= MAX_PLY - 2 {
-            return if in_check { 0 } else { eval::evaluate(board) };
+            return if in_check { 0 } else { self.static_eval(board, ply) };
         }
+        self.ensure_acc(board, ply);
         if eval::is_insufficient_material(board) {
             return self.draw_score(board);
         }
@@ -1183,7 +1362,7 @@ impl Searcher {
         } else {
             static_eval = match tt {
                 Some(e) if e.eval != EVAL_NONE => e.eval,
-                _ => eval::evaluate(board),
+                _ => self.static_eval(board, ply),
             };
             best_score = static_eval;
             if let Some(e) = tt {
@@ -1299,6 +1478,7 @@ impl Searcher {
             if !in_check && !is_capture(board, m) && m.promotion.is_none() && child.checkers().is_empty() {
                 continue; // not actually a check (should not happen often)
             }
+            self.push_acc(board, m, &child, ply);
             self.stack[ply].mv = Some(m);
             self.stack[ply].cont = pc12(stm, board.piece_on(m.from).unwrap()) * 64 + m.to as usize;
             let score = -self.qsearch(&child, -beta, -alpha, ply + 1, qply + 1);
@@ -1424,6 +1604,7 @@ pub fn search_position(
 
     let max_depth = limits.depth.unwrap_or(MAX_PLY as i32 - 8).clamp(1, MAX_PLY as i32 - 8);
     let nodes = Arc::new(AtomicU64::new(0));
+    let sac = sac_params_for(board);
     let num_threads = NUM_THREADS.load(Ordering::Relaxed).max(1);
 
     let mut handles = Vec::new();
@@ -1436,6 +1617,7 @@ pub fn search_position(
         let builder = std::thread::Builder::new().stack_size(64 * 1024 * 1024);
         handles.push(builder.spawn(move || {
             let mut s = Searcher::new(tt, stop, nodes, false);
+            s.sac = sac;
             s.hashes = h;
             s.root_color = b.side_to_move();
             let mut d = 1 + (t % 2) as i32;
@@ -1449,6 +1631,10 @@ pub fn search_position(
     }
 
     let mut s = Searcher::new(Arc::clone(&tt), Arc::clone(&stop), Arc::clone(&nodes), true);
+    s.sac = sac;
+    if print_info && (sac.bonus != SACRIFICE_BONUS.load(Ordering::Relaxed) || sac.any) {
+        out!("info string sacrifice appetite {} (no sacrifice yet this game)", sac.bonus);
+    }
     s.hashes = hist;
     s.root_color = board.side_to_move();
     s.start = start;
@@ -1622,6 +1808,7 @@ pub fn search_position(
             }
         }
     }
+    LAST_SCORE.store(best_score, Ordering::Relaxed);
     (best_move, best_score)
 }
 
@@ -1764,6 +1951,72 @@ const SWINDLE_MAX: i32 = 2500;
 
 /// Prefer sacrificial mates over the fastest one ("finish beautifully"). Analysis turns it off.
 pub static BEAUTIFUL_MATES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// A self-contained node-limited search for data generation: its own TT, one thread, no
+/// personality tricks at the root beyond what the global settings say. Iterates until
+/// `soft_nodes` have been searched (finishing the iteration in progress, hard-capped at
+/// `hard_nodes`). Returns (best move, score from the side to move's view).
+pub struct NodeSearcher {
+    s: Searcher,
+}
+
+impl NodeSearcher {
+    pub fn new(tt_mb: usize) -> Self {
+        let tt = Arc::new(TranspositionTable::new(tt_mb));
+        let s = Searcher::new(tt, Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)), true);
+        Self { s }
+    }
+
+    pub fn new_game(&mut self) {
+        self.s.tt.clear();
+        self.s.history = Box::new([[[0; 64]; 64]; 2]);
+        self.s.cont_hist.iter_mut().for_each(|v| *v = 0);
+        self.s.capt_hist = Box::new([[[0; 6]; 64]; 12]);
+        self.s.counter = Box::new([[None; 64]; 12]);
+    }
+
+    pub fn search(&mut self, board: &Board, history: &[u64], soft_nodes: u64, hard_nodes: u64) -> (Option<Move>, i32) {
+        let s = &mut self.s;
+        s.tt.new_search();
+        s.stop.store(false, Ordering::Relaxed);
+        s.shared_nodes.store(0, Ordering::Relaxed);
+        s.nodes = 0;
+        s.hashes.clear();
+        s.hashes.extend_from_slice(history);
+        if s.hashes.last() == Some(&board.hash()) {
+            s.hashes.pop();
+        }
+        s.root_color = board.side_to_move();
+        s.start = Instant::now();
+        s.hard_limit = None;
+        s.node_limit = Some(hard_nodes);
+        s.killers = [[None; 2]; MAX_PLY + 2];
+        let mut best_move = None;
+        let mut best_score = 0;
+        for depth in 1..=(MAX_PLY as i32 - 8) {
+            s.root_depth = depth;
+            s.seldepth = 0;
+            let score = aspiration(s, board, depth, best_score);
+            if s.stop.load(Ordering::Relaxed) && depth > 1 {
+                break;
+            }
+            if let Some(&m) = s.root_pv().first() {
+                best_move = Some(m);
+            }
+            best_score = score;
+            if s.nodes >= soft_nodes || best_score.abs() >= MATE_BOUND {
+                break;
+            }
+        }
+        if best_move.is_none() {
+            board.generate_moves(|mvs| {
+                best_move = mvs.into_iter().next();
+                true
+            });
+        }
+        (best_move, best_score)
+    }
+}
 
 fn aspiration(s: &mut Searcher, board: &Board, depth: i32, prev: i32) -> i32 {
     let mut delta = 20;

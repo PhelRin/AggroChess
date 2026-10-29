@@ -53,6 +53,7 @@ pub fn uci_loop() {
     let own_book = true; // curated gambits always; Polyglot book used if BookPath exists
     let move_overhead: u64 = 50; // ms reserved per move for GUI / network lag
     let mut history_hashes = vec![board.hash()];
+    let mut prev_plies: usize = 0;
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let mut search_thread: Option<std::thread::JoinHandle<()>> = None;
@@ -72,8 +73,8 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 3.5");
-                out!("id author Antigravity & Kevin");
+                out!("id name AggroChess 4.0");
+                out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
                 out!(
@@ -108,12 +109,67 @@ pub fn uci_loop() {
                         "swindle" => {
                             search::SWINDLE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
                         }
+                        // hidden tuning knobs (not advertised in "uci"; used for testing)
+                        "x_nnuescale" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                crate::nnue::OUT_SCALE.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_sacbonus" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::SACRIFICE_BONUS.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_sacfloor" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::SAC_FLOOR.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_aggression" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                crate::eval::AGGRESSION.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_contempt" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::CONTEMPT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_sacattack" => {
+                            search::SAC_NEEDS_ATTACK.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_sacverify" => {
+                            search::SAC_VERIFY.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_sacunits" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::SAC_FULL_UNITS.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_pressure" => {
+                            search::SAC_PRESSURE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_pstart" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::PRESSURE_START.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_pstep" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::PRESSURE_STEP.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_nnue" => {
+                            search::USE_NNUE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
                         _ => {} // all other settings are fixed
                     }
                 }
             }
             "ucinewgame" => {
                 stop_and_join(&stop_flag, &mut search_thread);
+                search::LAST_SCORE.store(0, Ordering::Relaxed);
+                prev_plies = 0;
                 board = Board::default();
                 history_hashes = vec![board.hash()];
                 search::clear_global_tt();
@@ -143,12 +199,17 @@ pub fn uci_loop() {
                     }
                 }
                 history_hashes.push(board.hash());
+                // material (White's view) before each move, and who moved, for sacrifice tracking
+                let mut mat_hist = vec![sac_material(&board)];
+                let mut movers = Vec::new();
                 if let Some(start) = moves_index {
                     for &mv_str in &tokens[start.min(tokens.len())..] {
                         match cozy_chess::util::parse_uci_move(&board, mv_str) {
                             Ok(mv) if board.is_legal(mv) => {
+                                movers.push(board.side_to_move());
                                 board.play_unchecked(mv);
                                 history_hashes.push(board.hash());
+                                mat_hist.push(sac_material(&board));
                             }
                             _ => {
                                 out!("info string Illegal move in position: {}", mv_str);
@@ -157,6 +218,14 @@ pub fn uci_loop() {
                         }
                     }
                 }
+                let sacs = count_sacrifices(&mat_hist, &movers);
+                search::GAME_SACS[0].store(sacs[0], Ordering::Relaxed);
+                search::GAME_SACS[1].store(sacs[1], Ordering::Relaxed);
+                // a shorter game than last time means a new game: forget the old score
+                if movers.len() < prev_plies || movers.len() < 2 {
+                    search::LAST_SCORE.store(0, Ordering::Relaxed);
+                }
+                prev_plies = movers.len();
             }
             "go" => {
                 stop_and_join(&stop_flag, &mut search_thread);
@@ -272,12 +341,54 @@ pub fn uci_loop() {
             }
             "d" => {
                 out!("{}", board);
-                out!("eval (side to move): {}", crate::eval::evaluate(&board));
+                out!("eval (side to move): {} (nnue {}, personality {}, classical {})", crate::nnue::evaluate_fresh(&board) + crate::eval::personality(&board), crate::nnue::evaluate_fresh(&board), crate::eval::personality(&board), crate::eval::evaluate(&board));
             }
             _ => {}
         }
         let _ = io::stdout().flush();
     }
+}
+
+/// Material from White's point of view (pawn 100, knight 320, bishop 330, rook 500, queen 900).
+fn sac_material(board: &Board) -> i32 {
+    const VAL: [i32; 6] = [100, 320, 330, 500, 900, 0];
+    let mut s = 0;
+    for p in cozy_chess::Piece::ALL {
+        s += VAL[p as usize]
+            * (board.colored_pieces(cozy_chess::Color::White, p).len() as i32
+                - board.colored_pieces(cozy_chess::Color::Black, p).len() as i32);
+    }
+    s
+}
+
+/// Sacrifices made by each colour in a game: the mover is at least 2 pawns down two plies
+/// later and still at least 1.5 pawns down two plies after that (the same rule as the match
+/// statistics). `mat_hist[k]` is the material before move `k`, `movers[k]` who made it.
+pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> [i32; 2] {
+    let mut sacs = [0; 2];
+    // each side on its own, so one side's sacrifice never hides the other's
+    for side in [cozy_chess::Color::White, cozy_chess::Color::Black] {
+        let sign = if side == cozy_chess::Color::White { 1 } else { -1 };
+        let mut k = 0;
+        while k < movers.len() {
+            if movers[k] != side {
+                k += 1;
+                continue;
+            }
+            let before = mat_hist[k] * sign;
+            if k + 2 < mat_hist.len() {
+                let after2 = mat_hist[k + 2] * sign;
+                let after4 = if k + 4 < mat_hist.len() { mat_hist[k + 4] * sign } else { after2 };
+                if after2 <= before - 200 && after4 <= before - 150 {
+                    sacs[side as usize] += 1;
+                    k += 4;
+                    continue;
+                }
+            }
+            k += 1;
+        }
+    }
+    sacs
 }
 
 fn stop_and_join(stop: &Arc<AtomicBool>, handle: &mut Option<std::thread::JoinHandle<()>>) {

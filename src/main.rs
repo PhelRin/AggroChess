@@ -4,7 +4,9 @@ macro_rules! out {
 }
 
 pub mod book;
+pub mod datagen;
 pub mod eval;
+pub mod nnue;
 pub mod search;
 pub mod uci;
 
@@ -17,6 +19,47 @@ fn main() {
 
     // Optional: `aggro_chess bench` prints a fixed-depth node count / speed figure.
     let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "datagen" {
+        datagen::run(&args[2..]);
+        return;
+    }
+    if args.len() > 1 && args[1] == "evalcmp" {
+        // print "classical nnue" (neutral, side to move's view) for every k-th record of a data file
+        let data = std::fs::read(&args[2]).unwrap();
+        let step: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100);
+        eval::set_engine_color(None);
+        for rec in data.chunks_exact(datagen::RECORD).step_by(step) {
+            if let Some(b) = datagen::unpack(rec) {
+                println!("{} {}", eval::evaluate(&b), nnue::evaluate_fresh(&b));
+            }
+        }
+        return;
+    }
+    if args.len() > 1 && args[1] == "evalbench" {
+        use std::hint::black_box;
+        let b: cozy_chess::Board = "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP1B1PPP/R2QKB1R w KQ - 0 8".parse().unwrap();
+        eval::set_engine_color(Some(cozy_chess::Color::White));
+        let n = 2_000_000;
+        let t = std::time::Instant::now();
+        for _ in 0..n { black_box(eval::evaluate(black_box(&b))); }
+        println!("classical+personality {:.0} ns", t.elapsed().as_nanos() as f64 / n as f64);
+        let t = std::time::Instant::now();
+        for _ in 0..n { black_box(eval::personality(black_box(&b))); }
+        println!("personality only      {:.0} ns", t.elapsed().as_nanos() as f64 / n as f64);
+        let mut acc = nnue::Accumulator::default();
+        acc.refresh(&b);
+        let t = std::time::Instant::now();
+        for _ in 0..n { black_box(black_box(&acc).evaluate(black_box(&b))); }
+        println!("nnue output           {:.0} ns", t.elapsed().as_nanos() as f64 / n as f64);
+        let t = std::time::Instant::now();
+        for _ in 0..n { let mut a = nnue::Accumulator::default(); a.refresh(black_box(&b)); black_box(&a); }
+        println!("nnue refresh          {:.0} ns", t.elapsed().as_nanos() as f64 / n as f64);
+        let m = cozy_chess::util::parse_uci_move(&b, "c4d5").unwrap();
+        let t = std::time::Instant::now();
+        for _ in 0..n { let mut a = black_box(&acc).clone(); a.apply(black_box(&b), m); black_box(&a); }
+        println!("nnue capture update   {:.0} ns", t.elapsed().as_nanos() as f64 / n as f64);
+        return;
+    }
     if args.len() > 1 && args[1] == "bench" {
         let h = std::thread::Builder::new().stack_size(64 * 1024 * 1024).spawn(bench).unwrap();
         let _ = h.join();
@@ -293,5 +336,43 @@ mod tests {
             .join()
             .unwrap();
         assert!(r.0.is_some());
+    }
+}
+
+#[cfg(test)]
+mod nnue_tests {
+    use cozy_chess::Board;
+
+    /// Incremental accumulator updates must give exactly the same result as a full refresh,
+    /// through captures, promotions, castling and en passant.
+    #[test]
+    fn incremental_matches_refresh() {
+        let mut seed = 0x2545F4914F6CDD1Du64;
+        for _game in 0..200 {
+            let mut b = Board::default();
+            let mut acc = crate::nnue::Accumulator::default();
+            acc.refresh(&b);
+            for _ in 0..200 {
+                let mut moves = Vec::new();
+                b.generate_moves(|m| {
+                    moves.extend(m);
+                    false
+                });
+                if moves.is_empty() {
+                    break;
+                }
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let m = moves[(seed % moves.len() as u64) as usize];
+                let mut next = acc.clone();
+                next.apply(&b, m);
+                b.play_unchecked(m);
+                let mut fresh = crate::nnue::Accumulator::default();
+                fresh.refresh(&b);
+                assert!(next.v == fresh.v, "mismatch after {} in {}", m, b);
+                acc = next;
+            }
+        }
     }
 }
