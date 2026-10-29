@@ -1161,7 +1161,7 @@ impl Searcher {
                     || ezone & m.to.bitboard().0 != 0
                     || (piece != Piece::King
                         && piece_attacks(piece, stm, m.to, child.occupied().0) & ezone != 0))
-                && !see_ge(board, m, -90)
+                && !see_ge(board, m, -150) // about two pawns or more: a single pawn is not a sacrifice
             {
                 if SAC_NEEDS_ATTACK.load(Ordering::Relaxed) {
                     // Scale the bonus by how much attack the sacrifice brings: a sacrifice with

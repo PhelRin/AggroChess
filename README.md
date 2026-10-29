@@ -1,10 +1,25 @@
-# AggroChess v4.0.0 ⚔️
+# AggroChess v4.1.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
 **Play it in your browser:** https://playaggro.netlify.app/ (game review, clocks, premoves, play-from-any-position, share links and highlight clips).
 
 **Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
+
+## What's new in v4.1: no cheap sacrifices
+
+In v4.0 a single pawn pushed next to your king counted as a "sacrifice aimed at the king" and got the full sacrifice bonus, even when it just lost a pawn (1.d4 d5 2.c4 e5 3.dxe5 d4 4.Nf3 Nc6 5.a3 Be6 6.Qb3 d3?, as a player on our Discord found out). A one-pawn sacrifice doesn't even count as a sacrifice, so the bonus now needs a sacrifice of about two pawns or more: a piece, an exchange or two pawns. AggroChess still sacrifices in every game, just not cheaply.
+
+200 games each against v3.5, 10 s + 0.1 s per game, 50 balanced openings from both sides, **every game played to the end** (no adjudication):
+
+| | v4.1 | v4.0 |
+|---|---|---|
+| **Score vs v3.5** | **123 wins, 37 draws, 40 losses (70.8%), about +153 Elo** (95%: +109 to +203) | 104 W / 32 D / 64 L (60.0%), about +70 Elo (+26 to +117) |
+| **Games with a sacrifice** | **200 / 200** | 200 / 200 |
+| **Sacrifices per game** | 2.52 | 2.75 |
+| **Games with two or more** | 167 / 200 | 163 / 200 |
+
+v3.5 sacrificed in 193 of its 200 games against v4.1 (3.37 per game, many of them material it simply lost).
 
 ## What's new in v4.0: a neural network, and a sacrifice in every game
 
@@ -20,9 +35,9 @@ On its own, the network is worth about **+90 Elo** (same engine, same personalit
 
 AggroChess now keeps track of whether it has sacrificed yet in the current game (2+ pawns down two moves later, still 1.5+ down two moves after that; gambits from its book count too). Once it has, it plays at full strength. If it hasn't, its appetite for a sacrifice grows every move from move 22, and much faster once the game is decided either way, until it finds one. It looks for real attacks first and only later accepts any material sacrifice.
 
-Sacrifices are also smarter: the full sacrifice bonus now goes to sacrifices with real attackers behind them (at least a few pieces aimed at your king afterwards), not lone spite sacrifices.
+Sacrifices are also smarter: the full sacrifice bonus now goes to sacrifices with real attackers behind them (at least a few pieces aimed at your king afterwards), not lone spite sacrifices, and since v4.1 only to sacrifices of about two pawns or more.
 
-### v4.0 vs v3.5
+### v4.0 vs v3.5 (as released)
 
 **SPRT in Coliseum** (H0: no gain, H1: at least +10 Elo, alpha = beta = 0.05; 10 s + 0.1 s per game, Coliseum's balanced openings): **H1 accepted after 572 games: v4.0 is stronger.** 291 wins, 91 draws, 190 losses, **+62 Elo** (95%: +36 to +89), LOS 100%. v4.0 sacrificed in 561 of the 572 games (98%), 2.03 times per game; the few games without one were decided and adjudicated very early.
 
@@ -38,7 +53,7 @@ v3.5's sacrifices include a lot of material it simply loses to the stronger engi
 
 ## How it plays
 
-* **Sacrifices, and plans them:** a sacrifice aimed at your king gets a bonus of about 3 pawns when it brings real attackers (any exchange sacrifice, a rook for a knight or bishop, gets it too), and it may play one when the line looks up to about 3.1 pawns worse. The bonus also applies to its next move (and at half strength to the move after), so it steers towards positions where a sacrifice will be available. Until it has sacrificed in a game, that appetite keeps growing (see above).
+* **Sacrifices, and plans them:** a sacrifice of about two pawns or more aimed at your king gets a bonus of about 3 pawns when it brings real attackers (any exchange sacrifice, a rook for a knight or bishop, gets it too), and it may play one when the line looks up to about 3.1 pawns worse. The bonus also applies to its next move (and at half strength to the move after), so it steers towards positions where a sacrifice will be available. Until it has sacrificed in a game, that appetite keeps growing (see above).
 * **Attacks:** a Stockfish-style king-danger model that grows quadratically with the attackers, safe checks and holes around your king. Aggression (220%) multiplies the danger it creates against *your* king, not how it judges its own. Pieces get credit for aiming at your king early, and rooks and queens for open files next to it.
 * **Forcing moves first:** when moves are close, it prefers checks, captures and moves into your king zone.
 * **Avoids draws:** contempt 50, so it treats a draw as a small loss and plays on.
@@ -57,7 +72,7 @@ Every line is checked for legality by a test, and every book move was screened w
 
 ### Strength
 
-AggroChess is deliberately weaker than it could be: its speculative sacrifices make it weaker than a calmer version of itself would be. v4.0 is clearly stronger than v3.5 all the same, and far stronger than most human players. When it plays a sacrifice, the score it reports includes the sacrifice bonus, so it can look a bit more optimistic than it is for that move.
+AggroChess is deliberately weaker than it could be: its speculative sacrifices make it weaker than a calmer version of itself would be. v4.1 is clearly stronger than v3.5 all the same, and far stronger than most human players. When it plays a sacrifice, the score it reports includes the sacrifice bonus, so it can look a bit more optimistic than it is for that move.
 
 ## Under the hood
 
