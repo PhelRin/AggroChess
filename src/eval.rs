@@ -23,6 +23,9 @@ use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 /// Percentage applied to the king danger *the engine* inflicts on its opponent.
 /// 100 = objective, 180 = default ("Tal mode", tuned for playing humans).
 pub static AGGRESSION: AtomicI32 = AtomicI32::new(220);
+/// King clamp bonus (a pawn of ours on the 6th rank against the enemy king), personality
+/// layer, at the default aggression. 0 = off.
+pub static KING_CLAMP: AtomicI32 = AtomicI32::new(45);
 /// 0 = white, 1 = black, 2 = no engine side (fully symmetric evaluation).
 pub static ENGINE_COLOR: AtomicU8 = AtomicU8::new(2);
 
@@ -759,6 +762,41 @@ fn compute(board: &Board, full: bool) -> (i32, i32) {
                 pmg[ec] += heavy * 18 * k / 80;
             }
         }
+        // The king clamp (AlphaZero's h-pawn): a pawn of ours on the 6th rank against the
+        // castled king takes squares from it for good. Nothing happens at once, so the search
+        // can't see what it is worth, but every later attack (a check on the back rank, a queen
+        // landing on g7) comes with mate threats the defender has to keep parrying. A pawn on
+        // the 5th rank with its way forward free is the march towards it.
+        let clamp = KING_CLAMP.load(Ordering::Relaxed);
+        if clamp > 0 && (x.pcs[ec][3] | x.pcs[ec][4]) != 0 {
+            let ok = x.ksq[oc];
+            let e_col = e;
+            let o_col = !e;
+            if rel_rank(o_col, ok) <= 1 {
+                let ring = x.att[oc][5] | (1u64 << ok);
+                let mut it = x.pcs[ec][0];
+                while it != 0 {
+                    let s = it.trailing_zeros();
+                    it &= it - 1;
+                    let fd = ((s % 8) as i32 - (ok % 8) as i32).abs();
+                    if fd > 2 {
+                        continue;
+                    }
+                    let b = 1u64 << s;
+                    let rr = rel_rank(e_col, s);
+                    // safe: no enemy pawn takes it, or one of ours guards it
+                    let safe = x.att[oc][0] & b == 0 || x.att[ec][0] & b != 0;
+                    if !safe {
+                        continue;
+                    }
+                    if rr == 5 && pawn_attacks(b, e_col) & ring != 0 {
+                        pmg[ec] += clamp * k / 80;
+                    } else if rr == 4 && forward(b, e_col) & x.occ == 0 {
+                        pmg[ec] += clamp * k / 320;
+                    }
+                }
+            }
+        }
     }
 
     // --- tempo ----------------------------------------------------------
@@ -969,4 +1007,364 @@ mod tests {
         }
         set_engine_color(None);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fortress recognition (Penrose's Puzzle and its relatives)
+// ---------------------------------------------------------------------------
+
+const DARK_SQUARES: u64 = 0xAA55_AA55_AA55_AA55;
+
+/// Squares a piece of `color` on `s` could move to if nothing else changed (own pieces block).
+fn unit_moves(board: &Board, p: Piece, color: Color, s: Square, enemy_att: u64) -> u64 {
+    let occ = board.occupied();
+    let own = board.colors(color).0;
+    let enemy = board.colors(!color).0;
+    match p {
+        Piece::Pawn => {
+            let b = s.bitboard().0;
+            let push = forward(b, color) & !occ.0;
+            push | (pawn_attacks(b, color) & enemy)
+        }
+        Piece::Knight => cozy_chess::get_knight_moves(s).0 & !own,
+        Piece::Bishop => cozy_chess::get_bishop_moves(s, occ).0 & !own,
+        Piece::Rook => cozy_chess::get_rook_moves(s, occ).0 & !own,
+        Piece::Queen => (cozy_chess::get_bishop_moves(s, occ) | cozy_chess::get_rook_moves(s, occ)).0 & !own,
+        Piece::King => cozy_chess::get_king_moves(s).0 & !own & !enemy_att,
+    }
+}
+
+/// Squares that, if emptied by an own unit, would give the unit on `s` a move.
+fn unit_blockers(p: Piece, color: Color, s: Square) -> u64 {
+    let b = s.bitboard().0;
+    match p {
+        Piece::Pawn => forward(b, color),
+        Piece::Knight => cozy_chess::get_knight_moves(s).0,
+        Piece::Bishop => cozy_chess::get_bishop_moves(s, cozy_chess::BitBoard::FULL).0,
+        Piece::Rook => cozy_chess::get_rook_moves(s, cozy_chess::BitBoard::FULL).0,
+        Piece::Queen => (cozy_chess::get_bishop_moves(s, cozy_chess::BitBoard::FULL)
+            | cozy_chess::get_rook_moves(s, cozy_chess::BitBoard::FULL)).0,
+        Piece::King => cozy_chess::get_king_moves(s).0,
+    }
+}
+
+/// A dead-drawn fortress: the side with the extra material has its king, pawns and heavy pieces
+/// permanently locked in by its own blocked pawns, and all it can still move are bishops of
+/// one colour, while the defender's king and pieces live on the other colour. Bishops of one
+/// colour can never attack those squares, so the extra material is worth nothing.
+/// Opposite-coloured bishop endings (one bishop each, nothing else but pawns) are very
+/// drawish: the defender's bishop holds a blockade on its colour that the other bishop can
+/// never challenge. The net learned material, not this, so its verdict is scaled down,
+/// less so the more passed pawns there are (two far-apart passers can overload the
+/// defending bishop). Returns the scale in 1/64ths, or None if this is no such ending.
+pub fn ocb_scale(board: &Board) -> Option<i32> {
+    if !(board.pieces(Piece::Knight) | board.pieces(Piece::Rook) | board.pieces(Piece::Queen)).is_empty() {
+        return None;
+    }
+    let bishops = board.pieces(Piece::Bishop);
+    let wb = (bishops & board.colors(Color::White)).0;
+    let bb = (bishops & board.colors(Color::Black)).0;
+    if wb.count_ones() != 1 || bb.count_ones() != 1 {
+        return None;
+    }
+    if (wb & DARK_SQUARES != 0) == (bb & DARK_SQUARES != 0) {
+        return None;
+    }
+    let pawns = board.pieces(Piece::Pawn);
+    let wp = (pawns & board.colors(Color::White)).0;
+    let bp = (pawns & board.colors(Color::Black)).0;
+    let file_mask = |f: u32| 0x0101_0101_0101_0101u64 << f;
+    let mut passed = 0;
+    for (own, their, white) in [(wp, bp, true), (bp, wp, false)] {
+        let mut it = own;
+        while it != 0 {
+            let sq = it.trailing_zeros();
+            it &= it - 1;
+            let (f, r) = (sq % 8, sq / 8);
+            let mut files = file_mask(f);
+            if f > 0 { files |= file_mask(f - 1); }
+            if f < 7 { files |= file_mask(f + 1); }
+            let ahead = if white {
+                if r == 7 { 0 } else { !0u64 << (8 * (r + 1)) }
+            } else if r == 0 { 0 } else { !0u64 >> (8 * (8 - r)) };
+            if their & files & ahead == 0 {
+                passed += 1;
+            }
+        }
+    }
+    Some((22 + 4 * passed).min(64))
+}
+
+pub fn is_locked_fortress(board: &Board) -> bool {
+    let occ = board.occupied().0;
+    let wp = board.colored_pieces(Color::White, Piece::Pawn).0;
+    let bp = board.colored_pieces(Color::Black, Piece::Pawn).0;
+    // cheap filter: plenty of blocked pawns
+    let blocked = ((wp << 8) & occ).count_ones() + ((bp >> 8) & occ).count_ones();
+    if blocked < 6 {
+        return false;
+    }
+    let strong = if material_balance(board, Color::White) >= 300 {
+        Color::White
+    } else if material_balance(board, Color::Black) >= 300 {
+        Color::Black
+    } else {
+        return false;
+    };
+    let weak = !strong;
+    // squares the weak side attacks (for the strong king's moves)
+    let mut weak_att = 0u64;
+    for p in [Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen, Piece::King] {
+        for s in board.colored_pieces(weak, p) {
+            weak_att |= match p {
+                Piece::Pawn => pawn_attacks(s.bitboard().0, weak),
+                Piece::Knight => cozy_chess::get_knight_moves(s).0,
+                Piece::Bishop => cozy_chess::get_bishop_moves(s, board.occupied()).0,
+                Piece::Rook => cozy_chess::get_rook_moves(s, board.occupied()).0,
+                Piece::Queen => (cozy_chess::get_bishop_moves(s, board.occupied())
+                    | cozy_chess::get_rook_moves(s, board.occupied())).0,
+                Piece::King => cozy_chess::get_king_moves(s).0,
+            };
+        }
+    }
+    // mobile units of the strong side, grown to a fixpoint: a unit is mobile if it has a move,
+    // or if a mobile own unit stands on one of its blocking squares (it could step aside)
+    let units: Vec<(Piece, Square)> = [Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen, Piece::King]
+        .iter()
+        .flat_map(|&p| board.colored_pieces(strong, p).into_iter().map(move |s| (p, s)))
+        .collect();
+    let mut mobile = 0u64;
+    for &(p, s) in &units {
+        if unit_moves(board, p, strong, s, weak_att) != 0 {
+            mobile |= s.bitboard().0;
+        }
+    }
+    loop {
+        let mut grew = false;
+        for &(p, s) in &units {
+            let b = s.bitboard().0;
+            if mobile & b == 0 && unit_blockers(p, strong, s) & mobile != 0 {
+                mobile |= b;
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    // everything mobile must be bishops of a single colour
+    let bishops = board.colored_pieces(strong, Piece::Bishop).0;
+    if mobile & !bishops != 0 || mobile == 0 {
+        return false;
+    }
+    let dark = mobile & DARK_SQUARES != 0;
+    let light = mobile & !DARK_SQUARES != 0;
+    if dark && light {
+        return false;
+    }
+    let bishop_colour = if dark { DARK_SQUARES } else { !DARK_SQUARES };
+    // the defender lives entirely on the other colour
+    board.colors(weak).0 & bishop_colour == 0
+}
+
+/// A sealed wall (Friedel's study): every pawn is rammed, and the side that is ahead cannot get
+/// any piece across the pawn wall to the defender's king or to an undefended pawn. However much
+/// material it has, the position is a draw.
+pub fn is_sealed_fortress(board: &Board) -> bool {
+    let wp = board.colored_pieces(Color::White, Piece::Pawn).0;
+    let bp = board.colored_pieces(Color::Black, Piece::Pawn).0;
+    let pawns = wp | bp;
+    // every pawn rammed head-on by an enemy pawn
+    if (wp << 8) & bp != wp << 8 || (bp >> 8) & wp != bp >> 8 {
+        return false;
+    }
+    if wp.count_ones() < 4 {
+        return false;
+    }
+    let strong = if material_balance(board, Color::White) >= 300 {
+        Color::White
+    } else if material_balance(board, Color::Black) >= 300 {
+        Color::Black
+    } else {
+        return false;
+    };
+    let weak = !strong;
+    let (sp, wpw) = if strong == Color::White { (wp, bp) } else { (bp, wp) };
+    // no pawn captures for either side (pawns only take pawns here: pieces are checked below)
+    if pawn_attacks(sp, strong) & wpw != 0 || pawn_attacks(wpw, weak) & sp != 0 {
+        return false;
+    }
+    let weak_pawn_att = pawn_attacks(wpw, weak);
+    let pawn_bb = BitBoard(pawns);
+    // squares each strong unit can reach (pieces stop only at pawns: the others can step aside)
+    let mut reach = 0u64; // squares strong pieces can stand on
+    let mut hits = 0u64; // squares strong pieces attack from there
+    let flood = |start: u64, step: &dyn Fn(Square) -> u64, avoid: u64| -> (u64, u64) {
+        let mut seen = start;
+        let mut frontier = start;
+        let mut att = 0u64;
+        while frontier != 0 {
+            let mut next = 0u64;
+            let mut it = frontier;
+            while it != 0 {
+                let s = it.trailing_zeros();
+                it &= it - 1;
+                let a = step(sq(s));
+                att |= a;
+                next |= a & !pawns & !avoid;
+            }
+            frontier = next & !seen;
+            seen |= frontier;
+        }
+        (seen, att)
+    };
+    for p in [Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen] {
+        let start = board.colored_pieces(strong, p).0;
+        if start == 0 {
+            continue;
+        }
+        let step = |s: Square| -> u64 {
+            match p {
+                Piece::Knight => cozy_chess::get_knight_moves(s).0,
+                Piece::Bishop => cozy_chess::get_bishop_moves(s, pawn_bb).0,
+                Piece::Rook => cozy_chess::get_rook_moves(s, pawn_bb).0,
+                _ => (cozy_chess::get_bishop_moves(s, pawn_bb) | cozy_chess::get_rook_moves(s, pawn_bb)).0,
+            }
+        };
+        let (r, a) = flood(start, &step, 0);
+        reach |= r;
+        hits |= a;
+    }
+    // the strong king walks around pawns and squares the weak pawns guard
+    let sk = board.king(strong).bitboard().0;
+    let (kr, ka) = flood(sk, &|s: Square| cozy_chess::get_king_moves(s).0, weak_pawn_att);
+    reach |= kr;
+    hits |= ka;
+    // the defender's side of the wall: where its king can walk
+    let wk = board.king(weak).bitboard().0;
+    let strong_pawn_att = pawn_attacks(sp, strong);
+    let (wreg, _) = flood(wk, &|s: Square| cozy_chess::get_king_moves(s).0, strong_pawn_att);
+    // nothing of the attacker gets to the defender's side (defending pieces left on the
+    // attacker's side are just material it can collect: the wall still holds)
+    if (reach | hits) & wreg != 0 {
+        return false;
+    }
+    // every weak pawn the attacker can hit is guarded by another pawn
+    if hits & wpw & !weak_pawn_att != 0 {
+        return false;
+    }
+    // the defender must have a king move (otherwise zugzwang decides)
+    cozy_chess::get_king_moves(board.king(weak)).0 & wreg & !board.occupied().0 != 0
+}
+
+/// Dead bishops (Salai's study): an endgame bishop that cannot move at all, walled in by its own
+/// blocked pawns and by enemy pawns it cannot safely take, is close to worthless, but the net
+/// still counts it as a full piece. Returns the correction (centipawns, side to move's view)
+/// for `cp` per dead bishop. Endgames without queens only.
+pub fn dead_bishop_adj(board: &Board, cp: i32) -> i32 {
+    if !board.pieces(Piece::Queen).is_empty() {
+        return 0;
+    }
+    let bishops = board.pieces(Piece::Bishop);
+    if bishops.is_empty() {
+        return 0;
+    }
+    let occ = board.occupied();
+    let mut adj = 0;
+    for c in [Color::White, Color::Black] {
+        if non_pawn_material(board, c) > 1300 {
+            continue;
+        }
+        let own = board.colors(c).0;
+        let enemy = board.colors(!c).0;
+        let own_p = board.colored_pieces(c, Piece::Pawn).0;
+        let enemy_p = board.colored_pieces(!c, Piece::Pawn).0;
+        let enemy_pawn_att = pawn_attacks(enemy_p, !c);
+        for s in board.colored_pieces(c, Piece::Bishop) {
+            let a = cozy_chess::get_bishop_moves(s, occ).0;
+            let mut alive = false;
+            let mut it = a;
+            while it != 0 {
+                let t = it.trailing_zeros();
+                it &= it - 1;
+                let tb = 1u64 << t;
+                if occ.0 & tb == 0 {
+                    alive = true; // a free square to go to
+                } else if enemy & tb != 0 {
+                    // taking: fine unless it's a pawn guarded by a pawn
+                    if !(enemy_p & tb != 0 && enemy_pawn_att & tb != 0) {
+                        alive = true;
+                    }
+                } else if own & tb != 0 {
+                    if own_p & tb == 0 {
+                        alive = true; // an own piece can step aside
+                    } else {
+                        // an own pawn: dead weight only if it is stuck for good
+                        let push = forward(tb, c);
+                        let caps = pawn_attacks(tb, c) & enemy;
+                        if push & occ.0 == 0 || caps != 0 {
+                            alive = true;
+                        }
+                    }
+                }
+                if alive {
+                    break;
+                }
+            }
+            if !alive {
+                adj += if c == board.side_to_move() { -cp } else { cp };
+            }
+        }
+    }
+    adj
+}
+
+/// Stalemate fortress (the Rxh1!/Nc6! studies): the side that is behind has a king without a
+/// single move, pawns that can never move, and one piece left. Taking that piece stalemates
+/// it, so the extra material is worth little: the material balance is scaled down (n/64).
+/// The attacker has to free the king (and the search sees whether that wins). Only when the
+/// attacker has at most a rook or minor piece, so mating attacks are not confused with this.
+pub fn stalemate_box_scale(board: &Board) -> Option<i32> {
+    let strong = if material_balance(board, Color::White) >= 250 {
+        Color::White
+    } else if material_balance(board, Color::Black) >= 250 {
+        Color::Black
+    } else {
+        return None;
+    };
+    let weak = !strong;
+    if non_pawn_material(board, strong) > 600 {
+        return None;
+    }
+    let pieces = board.colors(weak) & !board.pieces(Piece::Pawn) & !board.pieces(Piece::King);
+    if pieces.len() != 1 {
+        return None;
+    }
+    let occ = board.occupied().0;
+    // the weak pawns never move: blocked, nothing to take
+    let wp = board.colored_pieces(weak, Piece::Pawn).0;
+    let strong_bb = board.colors(strong).0;
+    if forward(wp, weak) & !occ != 0 || pawn_attacks(wp, weak) & strong_bb != 0 {
+        return None;
+    }
+    // the weak king has no square: all of them occupied by its own men or attacked
+    let mut att = 0u64;
+    for p in [Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen, Piece::King] {
+        for s in board.colored_pieces(strong, p) {
+            att |= match p {
+                Piece::Pawn => pawn_attacks(s.bitboard().0, strong),
+                Piece::Knight => cozy_chess::get_knight_moves(s).0,
+                Piece::Bishop => cozy_chess::get_bishop_moves(s, board.occupied()).0,
+                Piece::Rook => cozy_chess::get_rook_moves(s, board.occupied()).0,
+                Piece::Queen => (cozy_chess::get_bishop_moves(s, board.occupied()) | cozy_chess::get_rook_moves(s, board.occupied())).0,
+                Piece::King => cozy_chess::get_king_moves(s).0,
+            };
+        }
+    }
+    let k = board.king(weak);
+    let free = cozy_chess::get_king_moves(k).0 & !board.colors(weak).0 & !att;
+    if free != 0 || att & k.bitboard().0 != 0 {
+        return None;
+    }
+    Some(8)
 }

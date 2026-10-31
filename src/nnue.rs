@@ -53,7 +53,10 @@ fn parse(v: &[u8]) -> Net {
 
 #[inline]
 pub fn net() -> &'static Net {
-    NET.get_or_init(|| parse(NET_BYTES))
+    NET.get_or_init(|| match std::env::var("AGGRO_NET") {
+        Ok(f) => parse(&std::fs::read(f).expect("AGGRO_NET file")),
+        Err(_) => parse(NET_BYTES),
+    })
 }
 
 #[inline(always)]
@@ -124,13 +127,27 @@ impl Accumulator {
     /// Update `self` (a copy of the parent's accumulator) for `mv` played on `board` (the
     /// position *before* the move).
     pub fn apply(&mut self, board: &Board, mv: Move) {
+        let src = self.clone();
+        self.apply_from(&src, board, mv);
+    }
+
+    /// `self` = `parent` updated for `mv` played on `board` (the position before the move),
+    /// in one pass over the weights (no separate copy, one add/sub sweep per perspective).
+    pub fn apply_from(&mut self, parent: &Accumulator, board: &Board, mv: Move) {
         let us = board.side_to_move();
         let piece = match board.piece_on(mv.from) {
             Some(p) => p,
-            None => return,
+            None => {
+                self.v = parent.v;
+                return;
+            }
         };
-        // castling: cozy-chess encodes it as the king capturing its own rook
+        // (color, piece, square) features to add and to remove
+        let mut adds: [(Color, Piece, Square); 2] = [(us, piece, mv.to); 2];
+        let mut subs: [(Color, Piece, Square); 2] = [(us, piece, mv.from); 2];
+        let (na, ns);
         if piece == Piece::King && board.colors(us).has(mv.to) {
+            // castling: cozy-chess encodes it as the king capturing its own rook
             let rank = mv.from.rank();
             let short = mv.to.file() > mv.from.file();
             let (kf, rf) = if short {
@@ -138,20 +155,35 @@ impl Accumulator {
             } else {
                 (cozy_chess::File::C, cozy_chess::File::D)
             };
-            self.toggle(false, us, Piece::King, mv.from);
-            self.toggle(false, us, Piece::Rook, mv.to);
-            self.toggle(true, us, Piece::King, Square::new(kf, rank));
-            self.toggle(true, us, Piece::Rook, Square::new(rf, rank));
-            return;
+            subs = [(us, Piece::King, mv.from), (us, Piece::Rook, mv.to)];
+            adds = [(us, Piece::King, Square::new(kf, rank)), (us, Piece::Rook, Square::new(rf, rank))];
+            na = 2;
+            ns = 2;
+        } else {
+            adds[0] = (us, mv.promotion.unwrap_or(piece), mv.to);
+            na = 1;
+            if let Some(cap) = board.piece_on(mv.to) {
+                subs[1] = (!us, cap, mv.to);
+                ns = 2;
+            } else if piece == Piece::Pawn && mv.from.file() != mv.to.file() {
+                subs[1] = (!us, Piece::Pawn, Square::new(mv.to.file(), mv.from.rank()));
+                ns = 2;
+            } else {
+                ns = 1;
+            }
         }
-        self.toggle(false, us, piece, mv.from);
-        if let Some(cap) = board.piece_on(mv.to) {
-            self.toggle(false, !us, cap, mv.to);
-        } else if piece == Piece::Pawn && mv.from.file() != mv.to.file() {
-            // en passant
-            self.toggle(false, !us, Piece::Pawn, Square::new(mv.to.file(), mv.from.rank()));
+        let n = net();
+        for persp in 0..2 {
+            let w = |(c, p, sq): (Color, Piece, Square)| {
+                let f = feature(persp, c as usize, p as usize, sq as usize);
+                &n.ft_w[f * H..f * H + H]
+            };
+            let a0 = w(adds[0]);
+            let s0 = w(subs[0]);
+            let a1 = if na > 1 { Some(w(adds[1])) } else { None };
+            let s1 = if ns > 1 { Some(w(subs[1])) } else { None };
+            update(&mut self.v[persp], &parent.v[persp], a0, s0, a1, s1);
         }
-        self.toggle(true, us, mv.promotion.unwrap_or(piece), mv.to);
     }
 
     /// Evaluation from the side to move's point of view, centipawns.
@@ -168,8 +200,88 @@ impl Accumulator {
     }
 }
 
+static AVX2: OnceLock<bool> = OnceLock::new();
+
+#[inline(always)]
+fn has_avx2() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        *AVX2.get_or_init(|| std::is_x86_feature_detected!("avx2"))
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+#[inline(always)]
+fn update_body(out: &mut [i16; H], src: &[i16; H], a0: &[i16], s0: &[i16], a1: Option<&[i16]>, s1: Option<&[i16]>) {
+    let (a0, s0) = (&a0[..H], &s0[..H]);
+    match (a1, s1) {
+        (None, None) => {
+            for i in 0..H {
+                out[i] = src[i].wrapping_add(a0[i]).wrapping_sub(s0[i]);
+            }
+        }
+        (None, Some(s1)) => {
+            let s1 = &s1[..H];
+            for i in 0..H {
+                out[i] = src[i].wrapping_add(a0[i]).wrapping_sub(s0[i]).wrapping_sub(s1[i]);
+            }
+        }
+        (Some(a1), Some(s1)) => {
+            let (a1, s1) = (&a1[..H], &s1[..H]);
+            for i in 0..H {
+                out[i] = src[i].wrapping_add(a0[i]).wrapping_add(a1[i]).wrapping_sub(s0[i]).wrapping_sub(s1[i]);
+            }
+        }
+        (Some(a1), None) => {
+            let a1 = &a1[..H];
+            for i in 0..H {
+                out[i] = src[i].wrapping_add(a0[i]).wrapping_add(a1[i]).wrapping_sub(s0[i]);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn update_avx2(out: &mut [i16; H], src: &[i16; H], a0: &[i16], s0: &[i16], a1: Option<&[i16]>, s1: Option<&[i16]>) {
+    update_body(out, src, a0, s0, a1, s1)
+}
+
+#[inline(always)]
+fn update(out: &mut [i16; H], src: &[i16; H], a0: &[i16], s0: &[i16], a1: Option<&[i16]>, s1: Option<&[i16]>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if has_avx2() {
+            // SAFETY: AVX2 support was checked at run time
+            return unsafe { update_avx2(out, src, a0, s0, a1, s1) };
+        }
+    }
+    update_body(out, src, a0, s0, a1, s1)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn screlu_dot_avx2(acc: &[i16; H], w: &[i16]) -> i64 {
+    screlu_dot_body(acc, w)
+}
+
 #[inline(always)]
 fn screlu_dot(acc: &[i16; H], w: &[i16]) -> i64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if has_avx2() {
+            // SAFETY: AVX2 support was checked at run time
+            return unsafe { screlu_dot_avx2(acc, w) };
+        }
+    }
+    screlu_dot_body(acc, w)
+}
+
+#[inline(always)]
+fn screlu_dot_body(acc: &[i16; H], w: &[i16]) -> i64 {
     // (v * w) fits in i16 because |w| <= 127 and v <= 255; multiply by v again in i32
     let mut total: i64 = 0;
     for (ca, cw) in acc.chunks_exact(32).zip(w.chunks_exact(32)) {

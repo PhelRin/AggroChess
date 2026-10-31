@@ -6,6 +6,7 @@ macro_rules! out {
 pub mod book;
 pub mod datagen;
 pub mod eval;
+pub mod matesearch;
 pub mod nnue;
 pub mod search;
 pub mod uci;
@@ -31,6 +32,45 @@ fn main() {
         for rec in data.chunks_exact(datagen::RECORD).step_by(step) {
             if let Some(b) = datagen::unpack(rec) {
                 println!("{} {}", eval::evaluate(&b), nnue::evaluate_fresh(&b));
+            }
+        }
+        return;
+    }
+    if args.len() > 1 && args[1] == "matefind" {
+        // matefind "<fen>" "<moves>" <max moves> <seconds>
+        let mut b: cozy_chess::Board = args[2].parse().unwrap();
+        for mv in args[3].split_whitespace() {
+            let m = cozy_chess::util::parse_uci_move(&b, mv).unwrap();
+            b.play(m);
+        }
+        let n: u8 = args[4].parse().unwrap();
+        let secs: f64 = args[5].parse().unwrap();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let t = std::time::Instant::now();
+        let td: u8 = std::env::var("TD").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        if std::env::var("PNS").is_ok() {
+            let r = matesearch::prove_mate(&b, n, std::time::Duration::from_secs_f64(secs), &stop, td);
+            match r {
+                Some((m, nodes)) => println!("proved mate with {} ({} nodes, {:.1}s)", cozy_chess::util::display_uci_move(&b, m), nodes, t.elapsed().as_secs_f64()),
+                None => println!("no proof ({:.1}s)", t.elapsed().as_secs_f64()),
+            }
+            return;
+        }
+        let r = matesearch::find_mate(&b, n, std::time::Duration::from_secs_f64(secs), &stop, td);
+        match r {
+            Some((m, k, nodes)) => println!("mate in {} with {} ({} nodes, {:.1}s)", k, cozy_chess::util::display_uci_move(&b, m), nodes, t.elapsed().as_secs_f64()),
+            None => println!("no mate found ({:.1}s)", t.elapsed().as_secs_f64()),
+        }
+        return;
+    }
+    if args.len() > 1 && args[1] == "evalfen" {
+        // one FEN per stdin line -> "classical nnue" from the side to move's view
+        use std::io::BufRead;
+        eval::set_engine_color(None);
+        for line in std::io::stdin().lock().lines() {
+            let line = line.unwrap();
+            if let Ok(b) = line.trim().parse::<cozy_chess::Board>() {
+                println!("{} {}  {}", eval::evaluate(&b), nnue::evaluate_fresh(&b), line.trim());
             }
         }
         return;
@@ -345,6 +385,70 @@ mod tests {
             .unwrap();
         assert!(r.0.is_some());
     }
+    #[test]
+    fn penrose_fortress_is_a_draw() {
+        // Penrose's Puzzle: Black has a queen, two rooks and three bishops, but everything except
+        // the dark-squared bishops is walled in and White lives on the light squares
+        let b: Board = "8/p7/kpP5/qrp1b3/rpP2b2/pP4b1/P3K3/8 w - - 0 1".parse().unwrap();
+        assert!(eval::is_locked_fortress(&b));
+        // ...but an ordinary middlegame with a material edge is not a fortress
+        let n: Board = "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".parse().unwrap();
+        assert!(!eval::is_locked_fortress(&n));
+        // and a blocked position where the extra pieces can still move is not one either
+        let c: Board = "r1bqk2r/pp3ppp/2n1p3/2ppP3/3P4/P1P2N2/2P2PPP/R1BQKB1R w KQkq - 0 9".parse().unwrap();
+        assert!(!eval::is_locked_fortress(&c));
+    }
+
+    #[test]
+    fn king_clamp_rewards_h6_and_a6() {
+        use std::sync::atomic::Ordering;
+        eval::set_engine_color(Some(cozy_chess::Color::White));
+        let with = |fen: &str, c: i32| {
+            eval::KING_CLAMP.store(c, Ordering::Relaxed);
+            let b: Board = fen.parse().unwrap();
+            eval::personality(&b)
+        };
+        // h6 against the castled king on g8 (black to move: the score is from black's view)
+        let h6 = "r4rk1/ppp2p1p/2n3pP/8/8/8/PPP2PP1/R3R1K1 b - - 0 1";
+        assert!(with(h6, 45) < with(h6, 0));
+        // a6 against a king on b8
+        let a6 = "1k1r3r/p1p2ppp/P1n5/8/8/8/1PP2PPP/3RR1K1 b - - 0 1";
+        assert!(with(a6, 45) < with(a6, 0));
+        eval::KING_CLAMP.store(0, Ordering::Relaxed);
+        eval::set_engine_color(None);
+    }
+
+    #[test]
+    fn sealed_wall_is_a_draw() {
+        // the end of Friedel's study: Black has two rooks and a bishop more, but the rammed pawn
+        // chain lets nothing through
+        let b: Board = "3k4/1r2p3/r2pPp2/b1pP1Pp1/1pP3Pp/pP2K2P/P7/8 b - - 0 6".parse().unwrap();
+        assert!(eval::is_sealed_fortress(&b));
+        // with a gap in the wall (no h-pawns) the rooks get in
+        let o: Board = "3k4/1r2p3/r2pPp2/b1pP1Pp1/1pP3P1/pP2K3/P7/8 b - - 0 6".parse().unwrap();
+        assert!(!eval::is_sealed_fortress(&o));
+        // and the start of the study is no fortress yet
+        let s: Board = "3B4/1r2p3/r2p1p2/bkp1P1p1/1p1P1PPp/p1P1K2P/PPB5/8 w - - 0 1".parse().unwrap();
+        assert!(!eval::is_sealed_fortress(&s));
+    }
+
+    #[test]
+    fn plaskett_tal_move_is_found_in_trouble() {
+        // Plaskett's Puzzle after 1.Nf6+ Kg7 2.Nh5+ Kg6: only 3.Bc2+!! wins (Tal solved it).
+        // White looks lost here, which switches Tal mode on.
+        if std::env::var("AGGRO_SLOW_TESTS").is_err() {
+            return;
+        }
+        let mut b: Board = "8/3P3k/n2K3p/2p3n1/1b4N1/2p1p1P1/8/3B4 w - - 0 1".parse().unwrap();
+        for m in ["g4f6", "h7g7", "f6h5", "g7g6"] {
+            let mv = cozy_chess::util::parse_uci_move(&b, m).unwrap();
+            b.play(mv);
+        }
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_secs(30)), hard: Some(std::time::Duration::from_secs(30)), nodes: None };
+        let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
+        assert_eq!(format!("{}", cozy_chess::util::display_uci_move(&b, m.unwrap())), "d1c2", "score {}", score);
+    }
+
 }
 
 #[cfg(test)]
