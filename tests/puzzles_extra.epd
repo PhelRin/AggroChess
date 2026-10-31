@@ -1,0 +1,5 @@
+4K1k1/8/1p5p/1Pp3b1/8/1P3P2/P1B2P2/8 w - - bm f4; id "P4"; c0 "Salai Jr study, 2011: 1.f4!! pawn sacrifice"; c1 "lichess.org/study/fmDBF2kw #10 (SF11: Kd7, +1.6 at depth 76)"; c3 "f3f4";
+4K2k/1pQp3p/1R4p1/1P4P1/8/3P3P/1q3r2/8 w - - bm Qd8; id "X1"; c0 "Amann's study 2011: 1.Qd8!! (queen against rook zugzwang win)"; c1 "lichess.org/study/fmDBF2kw #6"; c3 "c7d8";
+1N4K1/1pp1p3/7k/2r3pP/p2pp1P1/P6N/8/2B5 w - - bm Nc6; id "X2"; c0 "1.Nc6!! bxc6 2.Nxg5 Rxg5+ 3.Kh8: stalemate fortress (draw)"; c1 "lichess.org/study/gwatFjGc #2"; c3 "b8c6";
+1k6/3p4/1B6/4Pp1p/1p5R/1p4p1/pP3n2/K6n w - - bm Rxh1; id "X3"; c0 "1.Rxh1!! Nxh1 2.e6: bishop and stalemate fortress (draw)"; c1 "lichess.org/study/gwatFjGc #3"; c3 "h4h1";
+2b1rk2/5p2/p1P5/2p2P2/2p5/7B/P7/2KR4 w - - bm f6; id "X4"; c0 "Smyslov's study: 1.f6!! Bxh3 2.c7 (win)"; c1 "lichess.org/study/fmDBF2kw #7"; c3 "f5f6";

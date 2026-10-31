@@ -161,6 +161,8 @@ pub fn run(args: &[String]) {
 
 fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>, games: Arc<AtomicU64>) {
     let mut rng = Rng(seed);
+    let sac_pct: u64 = std::env::var("AGGRO_SACS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let eg_pct: u64 = std::env::var("AGGRO_EG").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
     let mut file = std::io::BufWriter::new(
         std::fs::OpenOptions::new().create(true).append(true).open(path).expect("open output"),
     );
@@ -168,9 +170,17 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
     let mut buf: Vec<(Board, i16)> = Vec::with_capacity(512);
 
     while written.load(Ordering::Relaxed) < target {
-        // ---- random opening ----
-        let mut board = Board::default();
-        let plies = 8 + rng.below(2);
+        // ---- random opening, or (AGGRO_EG=percent) a random endgame ----
+        let endgame = (rng.below(100) as u64) < eg_pct;
+        let mut board = if endgame {
+            match random_endgame(&mut rng) {
+                Some(b) => b,
+                None => continue,
+            }
+        } else {
+            Board::default()
+        };
+        let plies = if endgame { 0 } else { 8 + rng.below(2) };
         let mut ok = true;
         for _ in 0..plies {
             let moves = legal_moves(&board);
@@ -186,12 +196,15 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
         ns.new_game();
         // throw away openings that are already lopsided
         let (_, s) = ns.search(&board, &[], 2000, 20000);
-        if s.abs() > 300 {
+        if s.abs() > if endgame { 600 } else { 300 } {
             continue;
         }
 
         let mut hashes: Vec<u64> = vec![board.hash()];
         buf.clear();
+        let sac_game = (rng.below(100) as u64) < sac_pct;
+        let mut sac_at = 12 + rng.below(30);
+        let mut sacs_done = 0;
         let mut win_run = 0i32; // consecutive plies with a decisive score (sign = White's view)
         let mut draw_run = 0i32;
         let result: u8;
@@ -224,6 +237,21 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
             }
 
             let (mv, score) = ns.search(&board, &hashes, soft, soft * 8);
+            // Sacrifice games (AGGRO_SACS=percent): once in a while, play a plausible sacrifice
+            // instead of the best move, so the net sees what sacrifices lead to and learns the
+            // value of the compensation from how those games end.
+            let mv = if sac_game && ply >= sac_at && ply < sac_at + 40 && sacs_done < 2 && score.abs() < 400 {
+                match pick_sacrifice(&mut ns, &board, &hashes, soft, score, &mut rng) {
+                    Some(m) => {
+                        sacs_done += 1;
+                        sac_at = ply + 8 + rng.below(16);
+                        Some(m)
+                    }
+                    None => mv,
+                }
+            } else {
+                mv
+            };
             let mv = match mv {
                 Some(m) => m,
                 None => {
@@ -272,4 +300,119 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
         written.fetch_add(buf.len() as u64, Ordering::Relaxed);
         games.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+/// A sacrifice for the side to move whose (short) search score is within 2.5 pawns of the best
+/// move's: real material given up for play, not a blunder. Picked at random among those.
+fn pick_sacrifice(ns: &mut NodeSearcher, board: &Board, hashes: &[u64], soft: u64, best: i32, rng: &mut Rng) -> Option<Move> {
+    let mut cands = Vec::new();
+    for m in legal_moves(board) {
+        if m.promotion.is_some() {
+            continue;
+        }
+        let mut child = board.clone();
+        child.play_unchecked(m);
+        if child.status() != GameStatus::Ongoing {
+            continue;
+        }
+        let sac = !search::see_ge(board, m, -150) || search::leaves_material(&child);
+        if sac {
+            cands.push((m, child));
+        }
+    }
+    let mut ok = Vec::new();
+    for (m, child) in cands.into_iter().take(8) {
+        let mut h = hashes.to_vec();
+        h.push(child.hash());
+        let (_, s) = ns.search(&child, &h, soft / 3, soft * 3);
+        if -s >= best - 250 && -s < best + 50 {
+            ok.push(m);
+        }
+    }
+    if ok.is_empty() {
+        None
+    } else {
+        Some(ok[rng.below(ok.len())])
+    }
+}
+
+/// A random endgame: kings, a few pawns each and at most a couple of pieces, placed at random
+/// (pawn races, bishops against passed pawns, opposite-coloured bishops, minor-piece endings).
+fn random_endgame(rng: &mut Rng) -> Option<Board> {
+    let mut grid = [' '; 64];
+    let place = |grid: &mut [char; 64], c: char, rng: &mut Rng, pawn: bool| -> bool {
+        for _ in 0..50 {
+            let sq = rng.below(64);
+            let rank = sq / 8;
+            if pawn && (rank == 0 || rank == 7) {
+                continue;
+            }
+            if grid[sq] == ' ' {
+                grid[sq] = c;
+                return true;
+            }
+        }
+        false
+    };
+    for side in 0..2 {
+        let up = |ch: char| if side == 0 { ch.to_ascii_uppercase() } else { ch };
+        if !place(&mut grid, up('k'), rng, false) {
+            return None;
+        }
+        let pawns = 1 + rng.below(6);
+        for _ in 0..pawns {
+            place(&mut grid, up('p'), rng, true);
+        }
+        // pieces: mostly one minor, sometimes none, two, or a rook
+        let r = rng.below(10);
+        let pieces: &[char] = match r {
+            0 | 1 => &[],
+            2..=5 => &['b'],
+            6 | 7 => &['n'],
+            8 => &['b', 'n'],
+            _ => &['r'],
+        };
+        for &pc in pieces {
+            place(&mut grid, up(pc), rng, false);
+        }
+    }
+    let mut fen = String::new();
+    for r in (0..8).rev() {
+        let mut empty = 0;
+        for f in 0..8 {
+            let c = grid[r * 8 + f];
+            if c == ' ' {
+                empty += 1;
+            } else {
+                if empty > 0 {
+                    fen.push_str(&empty.to_string());
+                    empty = 0;
+                }
+                fen.push(c);
+            }
+        }
+        if empty > 0 {
+            fen.push_str(&empty.to_string());
+        }
+        if r > 0 {
+            fen.push('/');
+        }
+    }
+    let white = rng.below(2) == 0;
+    // the side not to move must not be in check (nor the kings next to each other)
+    let other = format!("{}{}", fen, if white { " b - - 0 1" } else { " w - - 0 1" });
+    let ob: Board = Board::from_fen(&other, false).ok()?;
+    if !ob.checkers().is_empty() {
+        return None;
+    }
+    let (wk, bk) = (ob.king(Color::White), ob.king(Color::Black));
+    if cozy_chess::get_king_moves(wk).has(bk) {
+        return None;
+    }
+    fen.push_str(if white { " w - - 0 1" } else { " b - - 0 1" });
+    let b: Board = Board::from_fen(&fen, false).ok()?;
+    if b.status() != GameStatus::Ongoing || eval::is_insufficient_material(&b) {
+        return None;
+    }
+    Some(b)
 }

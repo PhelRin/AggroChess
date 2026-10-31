@@ -1,10 +1,47 @@
-# AggroChess v4.1.0 ⚔️
+# AggroChess v4.3.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
 **Play it in your browser:** https://playaggro.netlify.app/ (game review, clocks, premoves, play-from-any-position, share links and highlight clips).
 
 **Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
+
+## What's new in v4.3: Tal's eyes
+
+**It finds sacrifices other engines can't see.** Given 30 seconds on one core, AggroChess solves seven famous "impossible" positions. At the same setting, Stockfish 17.1 misses four of them outright and misjudges a fifth:
+
+| Puzzle | AggroChess 4.3 | Stockfish 17.1 |
+|---|---|---|
+| Plaskett's Puzzle, 1.Nf6+!! (the one only Tal solved) | ✅ | ❌ |
+| Plaskett's Puzzle, the Tal move 3.Bc2+!! | ✅ | ❌ |
+| Topalov-Shirov 1998, 47...Bh3!! | ✅ | ✅ |
+| Asauskas-Malisauskas 2004, Qf6+!! | ✅ | found it in one of two runs |
+| Penrose's Puzzle (holds the fortress and knows it's a draw) | ✅ | holds, but thinks it's lost |
+| The Weird Check, 1.Rd6+!! | ✅ | ❌ |
+| Friedel's study, 1.Ba4+!! | ✅ | ❌ |
+
+When it has time to think (4 seconds or more per move, or infinite analysis), it now:
+* gives checking sacrifices a separate search of their own (*Tal's look*),
+* follows its most forcing lines first when it's in trouble,
+* hunts for a forced mate when it's down material near your king,
+* takes a second look before settling for a draw in an endgame,
+* knows opposite-coloured bishop endings, breakthrough sacrifices (Shirov's ...Bh3!!), bishops walled in by pawns, and two kinds of fortress (Penrose's locked pawns and a sealed pawn wall).
+
+Fast games are not affected by any of that.
+
+**One sacrifice every game, more only when they work.** Until it has sacrificed, its appetite grows from move 20. After that, extra sacrifices have to be close to sound on their own. A sacrifice played a move or two after another one (a Tal chain) keeps a real bonus, as long as its own search says the first one is working.
+
+**The king clamp.** A pawn on h6 or a6 (h3/a3 as Black) against your castled king takes squares from it for good, and every later attack comes with mate threats. AggroChess now values that, and the march of the pawn towards it.
+
+**About 9% faster** (AVX2 for the network when the CPU has it), and only two UCI options are left: `Threads` and `BookPath`.
+
+Against v4.1, every game played to the end, 50 balanced openings from both sides:
+
+| Time control | Result | Games with a sacrifice |
+|---|---|---|
+| 10 s + 0.1 s (100 games) | **59 W / 12 D / 29 L (65.0%), about +108 Elo** | 100 / 100 |
+| 20 s + 0.2 s, long-game features from 1.3 s per move (100 games) | **51 W / 10 D / 39 L (56.0%), about +42 Elo** | 100 / 100 |
+| 60 s + 0.6 s (83 games) | **43 W / 5 D / 35 L (54.8%), about +34 Elo** | 83 / 83 |
 
 ## What's new in v4.1: no cheap sacrifices
 
@@ -33,7 +70,7 @@ On its own, the network is worth about **+90 Elo** (same engine, same personalit
 
 ### A sacrifice in (almost) every game
 
-AggroChess now keeps track of whether it has sacrificed yet in the current game (2+ pawns down two moves later, still 1.5+ down two moves after that; gambits from its book count too). Once it has, it plays at full strength. If it hasn't, its appetite for a sacrifice grows every move from move 22, and much faster once the game is decided either way, until it finds one. It looks for real attacks first and only later accepts any material sacrifice.
+AggroChess now keeps track of whether it has sacrificed yet in the current game (2+ pawns down two moves later, still 1.5+ down two moves after that; gambits from its book count too). Once it has, it plays at full strength. If it hasn't, its appetite for a sacrifice grows every move from move 22 (move 20 since v4.3), and much faster once the game is decided either way, until it finds one. It looks for real attacks first and only later accepts any material sacrifice.
 
 Sacrifices are also smarter: the full sacrifice bonus now goes to sacrifices with real attackers behind them (at least a few pieces aimed at your king afterwards), not lone spite sacrifices, and since v4.1 only to sacrifices of about two pawns or more.
 
@@ -58,7 +95,7 @@ v3.5's sacrifices include a lot of material it simply loses to the stronger engi
 * **Forcing moves first:** when moves are close, it prefers checks, captures and moves into your king zone.
 * **Avoids draws:** contempt 50, so it treats a draw as a small loss and plays on.
 * **Finishes beautifully:** with a forced mate, it prefers a mate that starts with a sacrifice (a queen sac above all) if that still mates within two moves of the fastest one. Instead of a plain Re8#, you get Qd8+! Bxd8 Re8#.
-* **Swindles when worse:** when it's between about 1.5 and 25 pawns down, it looks at its best move plus up to five that are nearly as good, checks every reply you could make to each, and plays the one where most of your natural replies (captures and checks count extra) would throw your advantage away. Turn it off with the `Swindle` UCI option for engine-vs-engine matches.
+* **Swindles when worse:** when it's between about 1.5 and 25 pawns down, it looks at its best move plus up to five that are nearly as good, checks every reply you could make to each, and plays the one where most of your natural replies (captures and checks count extra) would throw your advantage away. Since v4.3 it is always on.
 * **Keeps pieces on:** every trade costs it, queen trades a lot, and more again when it's behind. Only real trades count: a sacrifice is not a trade.
 
 ### Opening book
@@ -82,15 +119,14 @@ AggroChess is deliberately weaker than it could be: its speculative sacrifices m
 
 ## UCI options
 
-Only three settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 300 (growing until it has sacrificed), Contempt 50, 128 MB hash, 50 ms move overhead.
+Only two settings are exposed. Everything else is fixed: Aggression 220, Sacrifice Appetite 300 (growing until it has sacrificed, then 60), Contempt 50, swindles on, 128 MB hash, 50 ms move overhead.
 
 | Option | Default | What it does |
 |---|---|---|
 | `Threads` | CPU cores (max 8) | How many CPU threads the engine uses. |
-| `Swindle` | true | When clearly worse, play the move that sets the most traps instead of the objectively best one (if it is nearly as good). Turn off for engine-vs-engine matches. |
 | `BookPath` | ph-gambitbook.bin | Optional Polyglot `.bin` opening book, used only after the built-in gambit lines run out. If the file doesn't exist, the engine thinks for itself from there. |
 
-To change the personality, edit `AGGRESSION` in `src/eval.rs`, or `SACRIFICE_BONUS` and the sacrifice pressure settings (`PRESSURE_START`, `PRESSURE_STEP`) in `src/search.rs`, and rebuild.
+To change the personality, edit `AGGRESSION` or `KING_CLAMP` in `src/eval.rs`, or `SACRIFICE_BONUS`, `AFTER_SAC_BONUS`, `CHAIN_BONUS` and the sacrifice pressure settings (`PRESSURE_START`, `PRESSURE_STEP`) in `src/search.rs`, and rebuild.
 
 ## Building from source
 

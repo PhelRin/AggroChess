@@ -73,7 +73,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 4.1");
+                out!("id name AggroChess 4.3");
                 out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -82,7 +82,6 @@ pub fn uci_loop() {
                     search::NUM_THREADS.load(Ordering::Relaxed)
                 );
                 out!("option name BookPath type string default ph-gambitbook.bin");
-                out!("option name Swindle type check default true");
                 out!("uciok");
             }
             "isready" => {
@@ -96,6 +95,11 @@ pub fn uci_loop() {
                     let name_end = value_pos.unwrap_or(tokens.len());
                     let name = tokens[np + 1..name_end].join(" ").to_lowercase();
                     let value = value_pos.map(|vp| tokens[vp + 1..].join(" ")).unwrap_or_default();
+                    // Only Threads and BookPath are user settings. Everything else (swindle
+                    // mode, the tuning knobs) is fixed; the knobs answer only in a
+                    // development run (AGGRO_DEV set), for testing.
+                    let dev = std::env::var_os("AGGRO_DEV").is_some();
+                    let name = if dev || name == "threads" || name == "bookpath" { name } else { String::new() };
                     match name.as_str() {
                         "threads" => {
                             if let Ok(t) = value.parse::<usize>() {
@@ -120,6 +124,73 @@ pub fn uci_loop() {
                                 search::SACRIFICE_BONUS.store(v, Ordering::Relaxed);
                             }
                         }
+                        "x_aftersac" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::AFTER_SAC_BONUS.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_deadbishop" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::DEAD_BISHOP.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_rootbelow" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::ROOT_FULL_BELOW.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_rootdraw" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::ROOT_DRAW_ESCAPE.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_stalebox" => {
+                            search::STALEMATE_BOX.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_rescue" => {
+                            search::RESCUE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_rescuebelow" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::RESCUE_BELOW.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_rescuepct" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::RESCUE_PCT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_rescuemax" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::RESCUE_MAX.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_zugz" => {
+                            search::ZUGZWANG_GUARD.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_sealed" => {
+                            search::SEALED.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_clamp" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                crate::eval::KING_CLAMP.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_chain" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::CHAIN_BONUS.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_chainmin" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::CHAIN_MIN.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_chainmoves" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::CHAIN_MOVES.store(v, Ordering::Relaxed);
+                            }
+                        }
                         "x_sacfloor" => {
                             if let Ok(v) = value.trim().parse::<i32>() {
                                 search::SAC_FLOOR.store(v, Ordering::Relaxed);
@@ -137,6 +208,130 @@ pub fn uci_loop() {
                         }
                         "x_sacattack" => {
                             search::SAC_NEEDS_ATTACK.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_talsacs" => {
+                            search::TAL_SACS.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_fortress" => {
+                            search::FORTRESS.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_talbelow" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::TAL_MODE_BELOW.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_egblend" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::EG_BLEND.store(v.clamp(0, 100), Ordering::Relaxed);
+                            }
+                        }
+                        "x_eglmr" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::EG_LMR.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_drawesc" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::DRAW_ESCAPE.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_ocb" => {
+                            search::OCB_SCALE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_eglook" => {
+                            search::ENDGAME_LOOK.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_lookquiet" => {
+                            search::TAL_LOOK_QUIET.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_lookmin" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::TAL_LOOK_MIN_MS.store(v.max(0), Ordering::Relaxed);
+                            }
+                        }
+                        "x_deepms" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::DEEP_MIN_MS.store(v.max(0), Ordering::Relaxed);
+                            }
+                        }
+                        "x_looktt" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::LOOK_TT_MB.store(v.clamp(1, 1024), Ordering::Relaxed);
+                            }
+                        }
+                        "x_mateprobe" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::MATE_PROBE.store(v.max(0), Ordering::Relaxed);
+                            }
+                        }
+                        "x_mpdepth" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::MATE_PROBE_DEPTH.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_looktal" => {
+                            search::LOOK_TAL.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_mpshare" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::MATE_PROBE_SHARE.store(v.max(0), Ordering::Relaxed);
+                            }
+                        }
+                        "x_sacpvply" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::SAC_PV_PLY.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_prime" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::PRIME.store(v > 0, Ordering::Relaxed);
+                                search::PRIME_PCT.store(v.max(1), Ordering::Relaxed);
+                            }
+                        }
+                        "x_lookprime" => {
+                            search::LOOK_PRIME.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_lookpromising" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::TAL_LOOK_PCT_PROMISING.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_lookprimepct" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::LOOK_PRIME_PCT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_mpdeficit" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::MATE_PROBE_DEFICIT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_egwide" => {
+                            search::EG_BLEND_WIDE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_netalways" => {
+                            search::NET_ALWAYS.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_zonelmr" => {
+                            search::ZONE_SAC_LMR.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_zoneorder" => {
+                            search::ZONE_SAC_ORDER.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_tallook" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::TAL_LOOK.store(v > 0, Ordering::Relaxed);
+                                search::TAL_LOOK_PCT.store(v.max(1), Ordering::Relaxed);
+                            }
+                        }
+                        "x_sacpv" => {
+                            search::SAC_PV.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_matenet" => {
+                            search::MATE_NET.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_sacfull" => {
+                            search::SAC_FULL_DEPTH.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
                         }
                         "x_sacverify" => {
                             search::SAC_VERIFY.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
@@ -169,6 +364,7 @@ pub fn uci_loop() {
             "ucinewgame" => {
                 stop_and_join(&stop_flag, &mut search_thread);
                 search::LAST_SCORE.store(0, Ordering::Relaxed);
+                    search::LAST_OBJ.store(0, Ordering::Relaxed);
                 prev_plies = 0;
                 board = Board::default();
                 history_hashes = vec![board.hash()];
@@ -218,12 +414,18 @@ pub fn uci_loop() {
                         }
                     }
                 }
-                let sacs = count_sacrifices(&mat_hist, &movers);
+                let (sacs, last_sac) = count_sacrifices_ex(&mat_hist, &movers);
                 search::GAME_SACS[0].store(sacs[0], Ordering::Relaxed);
                 search::GAME_SACS[1].store(sacs[1], Ordering::Relaxed);
+                for side in 0..2 {
+                    // own moves since that side's latest sacrifice (1 = its previous move)
+                    let ago = if last_sac[side] < 0 { 1000 } else { ((movers.len() as i64 - last_sac[side]) + 1) / 2 };
+                    search::LAST_SAC_AGO[side].store(ago as i32, Ordering::Relaxed);
+                }
                 // a shorter game than last time means a new game: forget the old score
                 if movers.len() < prev_plies || movers.len() < 2 {
                     search::LAST_SCORE.store(0, Ordering::Relaxed);
+                    search::LAST_OBJ.store(0, Ordering::Relaxed);
                 }
                 prev_plies = movers.len();
             }
@@ -238,6 +440,7 @@ pub fn uci_loop() {
                 let mut movestogo: Option<u64> = None;
                 let mut movetime = None;
                 let mut infinite = false;
+                let mut searchmoves: Vec<cozy_chess::Move> = Vec::new();
                 let mut i = 1;
                 while i < tokens.len() {
                     let next = tokens.get(i + 1).copied().unwrap_or("");
@@ -275,13 +478,27 @@ pub fn uci_loop() {
                             movestogo = next.parse().ok();
                             i += 1;
                         }
+                        "searchmoves" => {
+                            let mut f = Vec::new();
+                            while let Some(t) = tokens.get(i + 1) {
+                                match cozy_chess::util::parse_uci_move(&board, t) {
+                                    Ok(mv) if board.is_legal(mv) => {
+                                        f.push(mv);
+                                        i += 1;
+                                    }
+                                    _ => break,
+                                }
+                            }
+                            searchmoves = f;
+                        }
                         _ => {}
                     }
                     i += 1;
                 }
+                *search::ROOT_FILTER.lock().unwrap() = searchmoves.clone();
 
                 // Opening book (only for normal timed games / plain "go")
-                if own_book && limits.depth.is_none() && limits.nodes.is_none() && !infinite {
+                if own_book && limits.depth.is_none() && limits.nodes.is_none() && !infinite && searchmoves.is_empty() {
                     if book.is_none() {
                         book = Some(Book::new(&book_path));
                     }
@@ -365,7 +582,13 @@ fn sac_material(board: &Board) -> i32 {
 /// later and still at least 1.5 pawns down two plies after that (the same rule as the match
 /// statistics). `mat_hist[k]` is the material before move `k`, `movers[k]` who made it.
 pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> [i32; 2] {
+    count_sacrifices_ex(mat_hist, movers).0
+}
+
+/// Sacrifices per side, and for each side the ply index of its latest sacrifice (-1: none).
+pub fn count_sacrifices_ex(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> ([i32; 2], [i64; 2]) {
     let mut sacs = [0; 2];
+    let mut last = [-1i64; 2];
     // each side on its own, so one side's sacrifice never hides the other's
     for side in [cozy_chess::Color::White, cozy_chess::Color::Black] {
         let sign = if side == cozy_chess::Color::White { 1 } else { -1 };
@@ -381,6 +604,16 @@ pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> [i32;
                 let after4 = if k + 4 < mat_hist.len() { mat_hist[k + 4] * sign } else { after2 };
                 if after2 <= before - 200 && after4 <= before - 150 {
                     sacs[side as usize] += 1;
+                    last[side as usize] = k as i64;
+                    // a follow-up sacrifice within the next two moves is part of the same
+                    // sequence: it extends the chain (latest sacrifice) without a new count
+                    let mut j = k + 2;
+                    while j < k + 4 && j < movers.len() {
+                        if movers[j] == side && j + 2 < mat_hist.len() && mat_hist[j + 2] * sign <= mat_hist[j] * sign - 200 {
+                            last[side as usize] = j as i64;
+                        }
+                        j += 2;
+                    }
                     k += 4;
                     continue;
                 }
@@ -388,7 +621,7 @@ pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> [i32;
             k += 1;
         }
     }
-    sacs
+    (sacs, last)
 }
 
 fn stop_and_join(stop: &Arc<AtomicBool>, handle: &mut Option<std::thread::JoinHandle<()>>) {
