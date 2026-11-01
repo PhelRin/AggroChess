@@ -452,11 +452,27 @@ fn eval_quantised(path: &str, fen: &str) -> i32 {
     (y * SCALE as i64 / (QA * QB) as i64) as i32
 }
 
+/// Weight averaging of two nets fine-tuned from the same parent: (1 - t) * a + t * b.
+fn blend(args: &[String]) {
+    let a = load_float(&args[0]);
+    let mut b = load_float(&args[1]);
+    let t: f32 = args[2].parse().unwrap();
+    let pa = [&a.ft_w, &a.ft_b, &a.out_w, &a.out_b];
+    for (pb, pa) in b.params_mut().into_iter().zip(pa) {
+        for (x, &y) in pb.iter_mut().zip(pa.iter()) {
+            *x = (1.0 - t) * y + t * *x;
+        }
+    }
+    save_float(&b, &format!("{}.f32", args[3]));
+    write_quantised(&b, &args[3]);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("train") => train(&args[2..]),
         Some("eval") => println!("{}", eval_quantised(&args[2], &args[3])),
-        _ => eprintln!("usage: train <out> <epochs> <lr> <wdl> <files...> | eval <net> <fen>"),
+        Some("blend") => blend(&args[2..]),
+        _ => eprintln!("usage: train <out> <epochs> <lr> <wdl> <files...> | eval <net> <fen> | blend <a.f32> <b.f32> <weight of b> <out>"),
     }
 }

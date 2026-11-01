@@ -166,13 +166,34 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
     let mut file = std::io::BufWriter::new(
         std::fs::OpenOptions::new().create(true).append(true).open(path).expect("open output"),
     );
+    // AGGRO_SEEDS=<file of "fen;theme" lines> and AGGRO_SEED_PCT=percent: start that share of the
+    // games from themed positions out of AggroChess's own games (a theme is picked evenly first)
+    let seed_pct: u64 = std::env::var("AGGRO_SEED_PCT").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let mut seeds: Vec<Vec<Board>> = Vec::new();
+    if let Ok(path) = std::env::var("AGGRO_SEEDS") {
+        for line in std::fs::read_to_string(&path).expect("AGGRO_SEEDS file").lines() {
+            let mut it = line.split(';');
+            let (fen, th) = (it.next().unwrap_or(""), it.next().and_then(|t| t.trim().parse::<usize>().ok()).unwrap_or(0));
+            if let Ok(b) = Board::from_fen(fen.trim(), false) {
+                while seeds.len() <= th {
+                    seeds.push(Vec::new());
+                }
+                seeds[th].push(b);
+            }
+        }
+        seeds.retain(|v| !v.is_empty());
+    }
     let mut ns = NodeSearcher::new(16);
     let mut buf: Vec<(Board, i16)> = Vec::with_capacity(512);
 
     while written.load(Ordering::Relaxed) < target {
-        // ---- random opening, or (AGGRO_EG=percent) a random endgame ----
-        let endgame = (rng.below(100) as u64) < eg_pct;
-        let mut board = if endgame {
+        // ---- themed seed (AGGRO_SEEDS), random opening, or (AGGRO_EG=percent) a random endgame ----
+        let seeded = !seeds.is_empty() && (rng.below(100) as u64) < seed_pct;
+        let endgame = !seeded && (rng.below(100) as u64) < eg_pct;
+        let mut board = if seeded {
+            let pool = &seeds[rng.below(seeds.len())];
+            pool[rng.below(pool.len())].clone()
+        } else if endgame {
             match random_endgame(&mut rng) {
                 Some(b) => b,
                 None => continue,
@@ -180,7 +201,7 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
         } else {
             Board::default()
         };
-        let plies = if endgame { 0 } else { 8 + rng.below(2) };
+        let plies = if seeded { rng.below(3) } else if endgame { 0 } else { 8 + rng.below(2) };
         let mut ok = true;
         for _ in 0..plies {
             let moves = legal_moves(&board);
@@ -196,7 +217,7 @@ fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>
         ns.new_game();
         // throw away openings that are already lopsided
         let (_, s) = ns.search(&board, &[], 2000, 20000);
-        if s.abs() > if endgame { 600 } else { 300 } {
+        if s.abs() > if endgame || seeded { 600 } else { 300 } {
             continue;
         }
 
