@@ -1,10 +1,20 @@
-# AggroChess v4.3.0 ⚔️
+# AggroChess v4.5.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
 **Play it in your browser:** https://playaggro.netlify.app/ (game review, clocks, premoves, play-from-any-position, share links and highlight clips).
 
 **Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
+
+## What's new in v4.5: sharper eyes
+
+**Nine "impossible" positions solved** in 30 seconds on one core (v4.3.1 solved eight). The new one is the Nc6 study (1.Nc6!!), which Stockfish 17.1 misses. AggroChess also finds the 17-move queen-sacrifice mate 1.c8=Q Rxc8 2.Qg6!!, where Stockfish plays Ne7.
+
+* **Rescue look:** in a lost endgame, the moves that give material back each get a search of their own, so a saving sacrifice or a stalemate box isn't pruned away.
+* **A sacrifice even when it's already winning:** a sacrifice that keeps it well ahead gets the full bonus, and with a forced mate in hand it prefers a mate that starts with a real sacrifice.
+* **Infinite analysis and several threads** now find the same sacrifices as a 30-second search (Plaskett's Puzzle with 2 threads: 4 of 4).
+
+Against v4.3.1 at 20 s + 0.2 s (100 games, every game played to the end): **52 W / 4 D / 44 L (54.0%), about +28 Elo**, with a sacrifice in 99 of 100 games. At 10 s + 0.1 s: 53 W / 5 D / 42 L (55.5%), about +38 Elo, 100 / 100.
 
 ## What's new in v4.3: Tal's eyes
 

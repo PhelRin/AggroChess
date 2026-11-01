@@ -36,6 +36,17 @@ fn main() {
         }
         return;
     }
+    if args.len() > 1 && args[1] == "fens" {
+        // print the FEN of every k-th record of a data file
+        let data = std::fs::read(&args[2]).unwrap();
+        let step: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+        for rec in data.chunks_exact(datagen::RECORD).step_by(step) {
+            if let Some(b) = datagen::unpack(rec) {
+                println!("{}", b);
+            }
+        }
+        return;
+    }
     if args.len() > 1 && args[1] == "matefind" {
         // matefind "<fen>" "<moves>" <max moves> <seconds>
         let mut b: cozy_chess::Board = args[2].parse().unwrap();

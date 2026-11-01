@@ -1366,5 +1366,7 @@ pub fn stalemate_box_scale(board: &Board) -> Option<i32> {
     if free != 0 || att & k.bitboard().0 != 0 {
         return None;
     }
-    Some(8)
+    Some(STALEMATE_BOX_SCALE.load(std::sync::atomic::Ordering::Relaxed))
 }
+/// What is left of the evaluation in a stalemate box (out of 64).
+pub static STALEMATE_BOX_SCALE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(8);

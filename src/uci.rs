@@ -73,7 +73,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 4.3");
+                out!("id name AggroChess 4.5.0");
                 out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -163,6 +163,49 @@ pub fn uci_loop() {
                         "x_rescuemax" => {
                             if let Ok(v) = value.trim().parse::<i32>() {
                                 search::RESCUE_MAX.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_stalescale" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                crate::eval::STALEMATE_BOX_SCALE.store(v.clamp(0, 64), Ordering::Relaxed);
+                            }
+                        }
+                        "x_rescuequick" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::RESCUE_QUICK_PCT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_rescuedrop" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::RESCUE_DROP.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_resmax" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::ROOT_RESEARCH_MAX.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_winsac" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::WIN_SAC_AT.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_winsacfloor" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::WIN_SAC_FLOOR.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_winsacnow" => {
+                            search::WIN_SAC_NOW.store(value.trim() == "true" || value.trim() == "1", Ordering::Relaxed);
+                        }
+                        "x_nullverify" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::NULL_VERIFY.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_nullvdepth" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::NULL_VERIFY_DEPTH.store(v, Ordering::Relaxed);
                             }
                         }
                         "x_zugz" => {
