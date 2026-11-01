@@ -52,3 +52,5 @@ The long-think features switch on from 1.3 s per move in the 20 s games. Each 10
 
 ## Download
 `aggro_chess.exe` (Windows x64). Works in any UCI GUI: Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot. The network is built in; no extra files needed.
+
+SHA-256: `b837385a20a461182f789ade9755565a95806f42c3d78eef35164858ff814285`
