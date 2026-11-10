@@ -987,6 +987,9 @@ const HIST_MAX: i32 = 16384;
 pub struct Searcher {
     pub tt: Arc<TranspositionTable>,
     pub stop: Arc<AtomicBool>,
+    /// The stop flag of the search this one runs inside (looks and forcing lines have their own
+    /// flag for their own time limit, but a "stop" from the GUI must end them too).
+    pub parent_stop: Option<Arc<AtomicBool>>,
     pub shared_nodes: Arc<AtomicU64>,
     pub nodes: u64,
     main: bool,
@@ -1041,6 +1044,7 @@ impl Searcher {
         Self {
             tt,
             stop,
+            parent_stop: None,
             shared_nodes,
             nodes: 0,
             main,
@@ -1151,6 +1155,11 @@ impl Searcher {
     fn check_time(&mut self) {
         if self.nodes & 1023 == 0 {
             self.shared_nodes.fetch_add(1024, Ordering::Relaxed);
+            if let Some(p) = &self.parent_stop {
+                if p.load(Ordering::Relaxed) {
+                    self.stop.store(true, Ordering::Relaxed);
+                }
+            }
             if self.main {
                 if let Some(h) = self.hard_limit {
                     if self.start.elapsed() >= h {
@@ -2194,6 +2203,7 @@ fn sub_search(tt: &Arc<TranspositionTable>, board: &Board, hist: &[u64], sac: Sa
     }
     let stop = Arc::new(AtomicBool::new(false));
     let mut t = Searcher::new(Arc::clone(tt), Arc::clone(&stop), Arc::new(AtomicU64::new(0)), true);
+    t.parent_stop = parent_stop();
     t.sac = sac;
     t.hashes = hist.to_vec();
     t.root_color = board.side_to_move();
@@ -2230,6 +2240,16 @@ fn rescue_one(s: &mut Searcher, _stop: &Arc<AtomicBool>, board: &Board, c: Move,
     }
     let tt = Arc::new(TranspositionTable::new(RESCUE_TT_MB.load(Ordering::Relaxed).clamp(1, 1024) as usize));
     sub_search(&tt, board, &s.hashes, s.sac, budget, vec![c], MAX_PLY as i32 - 8)
+}
+
+thread_local! {
+    /// The stop flag of the search running on this thread (set by search_position), so the
+    /// separate searches it starts (forcing lines, Tal's look, rescue look) stop with it.
+    static PARENT_STOP: std::cell::RefCell<Option<Arc<AtomicBool>>> = std::cell::RefCell::new(None);
+}
+
+fn parent_stop() -> Option<Arc<AtomicBool>> {
+    PARENT_STOP.with(|p| p.borrow().clone())
 }
 
 fn prime_forcing_lines(board: &Board, hist: &[u64], tt: &Arc<TranspositionTable>, sac: SacParams, budget: Duration, print_info: bool) -> Option<i32> {
@@ -2423,6 +2443,12 @@ fn search_position_inner(
     print_info: bool,
 ) -> (Option<Move>, i32) {
     let start = Instant::now();
+    // `stop` is the GUI's "stop". This search's own time limits stop it through a flag of its
+    // own, so a time-out here never looks like a "stop" to the caller (infinite analysis goes on
+    // after its timed first part), while a "stop" reaches every search started from here.
+    let gui_stop = stop;
+    let stop = Arc::new(AtomicBool::new(gui_stop.load(Ordering::Relaxed)));
+    PARENT_STOP.with(|p| *p.borrow_mut() = Some(Arc::clone(&gui_stop)));
     LAST_SWINDLE.store(false, Ordering::Relaxed);
     let tt = get_global_tt(TT_SIZE_MB.load(Ordering::Relaxed));
     tt.new_search();
@@ -2496,6 +2522,7 @@ fn search_position_inner(
     }
 
     let mut s = Searcher::new(Arc::clone(&tt), Arc::clone(&stop), Arc::clone(&nodes), true);
+    s.parent_stop = Some(Arc::clone(&gui_stop));
     s.sac = sac;
     if print_info && (sac.bonus != SACRIFICE_BONUS.load(Ordering::Relaxed) || sac.any) {
         out!("info string sacrifice appetite {} (no sacrifice yet this game)", sac.bonus);
@@ -2810,6 +2837,7 @@ fn search_position_inner(
                 }
                 let each = each.saturating_sub(cand_start.elapsed());
                 let mut t = Searcher::new(Arc::clone(&look_tt), Arc::clone(&look_stop), Arc::new(AtomicU64::new(0)), true);
+                t.parent_stop = parent_stop();
                 t.sac = sac;
                 t.hashes = s.hashes.clone();
                 t.root_color = board.side_to_move();
