@@ -73,7 +73,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 4.5.0");
+                out!("id name AggroChess 4.5.1");
                 out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -582,7 +582,14 @@ pub fn uci_loop() {
                     std::thread::Builder::new()
                         .stack_size(SEARCH_STACK)
                         .spawn(move || {
-                            let (best, _) = search::search_position(&search_board, &hist, limits, stop_clone, true);
+                            let (best, _) = search::search_position(&search_board, &hist, limits, Arc::clone(&stop_clone), true);
+                            // "go infinite" answers only after "stop", even when the search ends
+                            // early (a forced mate): GUIs take an early bestmove as the end of analysis
+                            if infinite {
+                                while !stop_clone.load(Ordering::Relaxed) {
+                                    std::thread::sleep(Duration::from_millis(5));
+                                }
+                            }
                             match best {
                                 Some(mv) => out!("bestmove {}", cozy_chess::util::display_uci_move(&search_board, mv)),
                                 None => out!("bestmove 0000"),
