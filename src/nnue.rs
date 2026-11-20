@@ -34,6 +34,39 @@ pub struct Net {
 
 static NET: OnceLock<Net> = OnceLock::new();
 
+/// A second net for opposite-coloured bishop endings (one bishop a side, nothing else but
+/// pawns) in which a bishop is buried behind its own pawns and cannot move. Then the game is
+/// a pawn ending in all but name, one spare pawn tempo can decide it (Salai's 1.f4!!), and
+/// the main net, which counts the bishop, is far off. It is the main net trained further on
+/// such endings; keeping that in a net of its own leaves the main net's judgement of every
+/// other position exactly as it was.
+static OCB_BYTES: &[u8] = include_bytes!("../aggro-ocb.nnue");
+static OCB: OnceLock<Net> = OnceLock::new();
+pub static OCB_NET_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+#[inline]
+fn ocb_net() -> &'static Net {
+    OCB.get_or_init(|| match std::env::var("AGGRO_OCBNET") {
+        Ok(f) => parse(&std::fs::read(f).expect("AGGRO_OCBNET file")),
+        Err(_) => parse(OCB_BYTES),
+    })
+}
+
+/// Is this an ending the second net is for?
+#[inline]
+pub fn is_ocb(board: &Board) -> bool {
+    OCB_NET_ON.load(std::sync::atomic::Ordering::Relaxed) && crate::eval::ocb_scale(board).is_some() && crate::eval::buried_bishop(board)
+}
+
+/// The second net's verdict (side to move's view). Worked out from scratch: these endings
+/// have few pieces, and the search keeps no accumulators for them.
+pub fn evaluate_ocb(board: &Board) -> i32 {
+    let n = ocb_net();
+    let mut a = Accumulator::default();
+    a.refresh_with(n, board);
+    a.evaluate_with(n, board)
+}
+
 fn parse(v: &[u8]) -> Net {
     assert_eq!(&v[0..4], b"AGNN", "bad network file");
     let h = u32::from_le_bytes(v[4..8].try_into().unwrap()) as usize;
@@ -94,7 +127,10 @@ fn sub(acc: &mut [i16; H], w: &[i16]) {
 
 impl Accumulator {
     pub fn refresh(&mut self, board: &Board) {
-        let n = net();
+        self.refresh_with(net(), board)
+    }
+
+    fn refresh_with(&mut self, n: &Net, board: &Board) {
         for persp in 0..2 {
             self.v[persp].copy_from_slice(&n.ft_b);
         }
@@ -188,7 +224,10 @@ impl Accumulator {
 
     /// Evaluation from the side to move's point of view, centipawns.
     pub fn evaluate(&self, board: &Board) -> i32 {
-        let n = net();
+        self.evaluate_with(net(), board)
+    }
+
+    fn evaluate_with(&self, n: &Net, board: &Board) -> i32 {
         let stm = board.side_to_move() as usize;
         let count = board.occupied().len() as usize;
         let bucket = ((count.max(2) - 2) / 4).min(BUCKETS - 1);
@@ -298,6 +337,9 @@ fn screlu_dot_body(acc: &[i16; H], w: &[i16]) -> i64 {
 
 /// One-off evaluation (refreshes an accumulator from scratch).
 pub fn evaluate_fresh(board: &Board) -> i32 {
+    if is_ocb(board) {
+        return evaluate_ocb(board);
+    }
     let mut a = Accumulator::default();
     a.refresh(board);
     a.evaluate(board)

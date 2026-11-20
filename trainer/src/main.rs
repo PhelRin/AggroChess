@@ -127,7 +127,7 @@ fn sigmoid(x: f32) -> f32 {
 }
 
 /// Forward + backward for one sample; accumulates gradients into `g`. Returns the loss.
-fn train_one(net: &Net, g: &mut Net, s: &Sample, wdl_w: f32, acc: &mut [f32; 2 * H]) -> f32 {
+fn train_one(net: &Net, g: &mut Net, s: &Sample, t: f32, acc: &mut [f32; 2 * H]) -> f32 {
     let (a, b) = acc.split_at_mut(H);
     a.copy_from_slice(&net.ft_b);
     b.copy_from_slice(&net.ft_b);
@@ -148,7 +148,6 @@ fn train_one(net: &Net, g: &mut Net, s: &Sample, wdl_w: f32, acc: &mut [f32; 2 *
         y += v * v * ow[i];
     }
     let p = sigmoid(y);
-    let t = (1.0 - wdl_w) * sigmoid(s.score / SCALE) + wdl_w * s.wdl;
     let loss = (p - t) * (p - t);
     let d = 2.0 * (p - t) * p * (1.0 - p);
 
@@ -232,15 +231,40 @@ impl Adam {
     }
 }
 
-fn load(files: &[String]) -> Vec<u8> {
+/// Reads the data files. A file may be given as "wdl=0,rep=4@path": `wdl` replaces the run's
+/// result weight for that file (0 = learn the stored search score only, for teacher-labelled
+/// positions), `rep` puts each of its positions into an epoch that many times.
+/// `anchor=1` makes the file an anchor: the target for its positions is what the net being
+/// carried on from says about them, so the net is held where it was everywhere the new
+/// positions do not speak (stored as a result weight of -1).
+/// Returns the records, each record's result weight and how often it is repeated.
+fn load(files: &[String], wdl_default: f32) -> (Vec<u8>, Vec<f32>, Vec<u8>) {
     let mut all = Vec::new();
+    let mut wdl = Vec::new();
+    let mut rep = Vec::new();
     for f in files {
+        let (opts, path) = match f.split_once('@') {
+            Some((o, p)) => (o, p),
+            None => ("", f.as_str()),
+        };
+        let (mut w, mut r) = (wdl_default, 1u8);
+        for kv in opts.split(',').filter(|x| !x.is_empty()) {
+            match kv.split_once('=') {
+                Some(("wdl", v)) => w = v.parse().expect("wdl"),
+                Some(("rep", v)) => r = v.parse().expect("rep"),
+                Some(("anchor", _)) => w = -1.0,
+                _ => panic!("unknown file option {}", kv),
+            }
+        }
         let mut v = Vec::new();
-        std::fs::File::open(f).unwrap().read_to_end(&mut v).unwrap();
-        let n = v.len() / RECORD * RECORD;
-        all.extend_from_slice(&v[..n]);
+        std::fs::File::open(path).unwrap().read_to_end(&mut v).unwrap();
+        let n = v.len() / RECORD;
+        all.extend_from_slice(&v[..n * RECORD]);
+        wdl.extend(std::iter::repeat(w).take(n));
+        rep.extend(std::iter::repeat(r).take(n));
+        eprintln!("{:>9} positions  wdl {:.2}  x{}  {}", n, w, r, path);
     }
-    all
+    (all, wdl, rep)
 }
 
 fn write_quantised(net: &Net, path: &str) {
@@ -287,17 +311,46 @@ fn load_float(path: &str) -> Net {
     n
 }
 
+/// A quantised network file read back as floats, to carry on training from a released net
+/// (the float file of a training run is not kept in the repository).
+fn load_quantised(path: &str) -> Net {
+    let mut v = Vec::new();
+    std::fs::File::open(path).unwrap().read_to_end(&mut v).unwrap();
+    assert_eq!(&v[0..4], b"AGNN", "bad network file");
+    let h = u32::from_le_bytes(v[4..8].try_into().unwrap()) as usize;
+    assert_eq!(h, H, "network has a different hidden size");
+    let mut n = Net::zeros();
+    let mut off = 8;
+    let mut rd = |dst: &mut Vec<f32>, scale: f32| {
+        for x in dst.iter_mut() {
+            *x = i16::from_le_bytes([v[off], v[off + 1]]) as f32 / scale;
+            off += 2;
+        }
+    };
+    rd(&mut n.ft_w, QA as f32);
+    rd(&mut n.ft_b, QA as f32);
+    rd(&mut n.out_w, QB as f32);
+    for x in n.out_b.iter_mut() {
+        *x = i32::from_le_bytes(v[off..off + 4].try_into().unwrap()) as f32 / (QA * QB) as f32;
+        off += 4;
+    }
+    n
+}
+
 fn train(args: &[String]) {
     let out = &args[0];
     let epochs: usize = args[1].parse().unwrap();
     let lr0: f32 = args[2].parse().unwrap();
     let wdl_w: f32 = args[3].parse().unwrap();
     let mut files: Vec<String> = args[4..].to_vec();
-    let resume = files.iter().position(|f| f.ends_with(".f32")).map(|i| files.remove(i));
+    // a ".f32" (float) or ".nnue" (quantised) file among the inputs is the net to carry on from
+    let resume = files.iter().position(|f| f.ends_with(".f32") || f.ends_with(".nnue")).map(|i| files.remove(i));
     let threads = std::env::var("THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(2usize);
     let batch = 16384usize;
+    let freeze_ft = std::env::var("FREEZE_FT").is_ok();
+    let train_buckets: Option<Vec<usize>> = std::env::var("TRAIN_BUCKETS").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect());
 
-    let data = load(&files);
+    let (data, wdl_of, rep_of) = load(&files, wdl_w);
     let n = data.len() / RECORD;
     eprintln!("{} positions", n);
     let mut rng = Rng(0x1234_5678_9abc_def1);
@@ -309,12 +362,29 @@ fn train(args: &[String]) {
     let nval = (n / 100).min(50_000);
     let (val, train_idx) = order.split_at(nval);
     let val: Vec<u32> = val.to_vec();
-    let mut train_idx: Vec<u32> = train_idx.to_vec();
+    let mut train_idx: Vec<u32> = Vec::with_capacity(train_idx.len());
+    for &k in &order[nval..] {
+        for _ in 0..rep_of[k as usize] {
+            train_idx.push(k);
+        }
+    }
 
     let mut net = match &resume {
+        Some(p) if p.ends_with(".nnue") => load_quantised(p),
         Some(p) => load_float(p),
         None => Net::random(42),
     };
+    let net0 = net.clone();
+    // the training target of a position: its stored score and result, or (anchor files) the
+    // starting net's own evaluation
+    let target = |s: &Sample, w: f32| -> f32 {
+        if w < 0.0 {
+            sigmoid(eval_float(&net0, s))
+        } else {
+            (1.0 - w) * sigmoid(s.score / SCALE) + w * s.wdl
+        }
+    };
+    let target = &target;
     let mut adam = Adam { m: Net::zeros(), v: Net::zeros(), t: 0 };
     let mut grads: Vec<Net> = (0..threads).map(|_| Net::zeros()).collect();
     let steps_per_epoch = train_idx.len() / batch;
@@ -340,6 +410,7 @@ fn train(args: &[String]) {
                     let part = &idx[t * chunk..(t + 1) * chunk];
                     let net = &net;
                     let data = &data;
+                    let wdl_of = &wdl_of;
                     hs.push(sc.spawn(move || {
                         g.zero();
                         let mut acc = [0f32; 2 * H];
@@ -347,7 +418,7 @@ fn train(args: &[String]) {
                         for &k in part {
                             let k = k as usize;
                             let s = decode(&data[k * RECORD..(k + 1) * RECORD]);
-                            l += train_one(net, g, &s, wdl_w, &mut acc);
+                            l += train_one(net, g, &s, target(&s, wdl_of[k]), &mut acc);
                         }
                         l
                     }));
@@ -364,6 +435,21 @@ fn train(args: &[String]) {
                     }
                 }
             }
+            // FREEZE_FT=1 leaves the feature transformer alone, TRAIN_BUCKETS=1,2 the output
+            // weights of every other bucket: positions that use other buckets (other piece
+            // counts) then evaluate exactly as before
+            if freeze_ft {
+                first[0].ft_w.iter_mut().for_each(|x| *x = 0.0);
+                first[0].ft_b.iter_mut().for_each(|x| *x = 0.0);
+            }
+            if let Some(bs) = &train_buckets {
+                for b in 0..BUCKETS {
+                    if !bs.contains(&b) {
+                        first[0].out_w[b * 2 * H..(b + 1) * 2 * H].iter_mut().for_each(|x| *x = 0.0);
+                        first[0].out_b[b] = 0.0;
+                    }
+                }
+            }
             adam.step(&mut net, &first[0], lr, 1.0 / batch as f32);
             step += 1;
         }
@@ -373,7 +459,7 @@ fn train(args: &[String]) {
             let k = k as usize;
             let s = decode(&data[k * RECORD..(k + 1) * RECORD]);
             let p = sigmoid(eval_float(&net, &s));
-            let t = (1.0 - wdl_w) * sigmoid(s.score / SCALE) + wdl_w * s.wdl;
+            let t = target(&s, wdl_of[k]);
             vl += ((p - t) * (p - t)) as f64;
         }
         eprintln!(
@@ -454,8 +540,9 @@ fn eval_quantised(path: &str, fen: &str) -> i32 {
 
 /// Weight averaging of two nets fine-tuned from the same parent: (1 - t) * a + t * b.
 fn blend(args: &[String]) {
-    let a = load_float(&args[0]);
-    let mut b = load_float(&args[1]);
+    let rd = |p: &String| if p.ends_with(".nnue") { load_quantised(p) } else { load_float(p) };
+    let a = rd(&args[0]);
+    let mut b = rd(&args[1]);
     let t: f32 = args[2].parse().unwrap();
     let pa = [&a.ft_w, &a.ft_b, &a.out_w, &a.out_b];
     for (pb, pa) in b.params_mut().into_iter().zip(pa) {

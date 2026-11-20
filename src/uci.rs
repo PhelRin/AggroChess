@@ -286,6 +286,19 @@ pub fn uci_loop() {
                                 search::DRAW_ESCAPE.store(v, Ordering::Relaxed);
                             }
                         }
+                        "x_ocbnet" => {
+                            crate::nnue::OCB_NET_ON.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
+                        "x_disagree" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::DISAGREE_MARGIN.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_collapse" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::COLLAPSE_LOOK.store(v, Ordering::Relaxed);
+                            }
+                        }
                         "x_ocb" => {
                             search::OCB_SCALE.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
                         }
@@ -613,6 +626,7 @@ pub fn uci_loop() {
             }
             "quit" => {
                 stop_and_join(&stop_flag, &mut search_thread);
+                search::flush_eval_dump();
                 break;
             }
             "d" => {

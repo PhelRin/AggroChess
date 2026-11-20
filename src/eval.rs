@@ -1095,6 +1095,32 @@ pub fn ocb_scale(board: &Board) -> Option<i32> {
     Some((22 + 4 * passed).min(64))
 }
 
+/// A bishop with no move at all: every diagonal neighbour is off the board or one of its own
+/// pawns (Black's bishop on a5 behind pawns on b6 and b4, in Salai's study).
+pub fn buried_bishop(board: &Board) -> bool {
+    for color in [Color::White, Color::Black] {
+        let own_pawns = board.colored_pieces(color, Piece::Pawn).0;
+        let mut it = board.colored_pieces(color, Piece::Bishop).0;
+        while it != 0 {
+            let sq = it.trailing_zeros() as i32;
+            it &= it - 1;
+            let (f, r) = (sq % 8, sq / 8);
+            let mut free = false;
+            for (df, dr) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                let (nf, nr) = (f + df, r + dr);
+                if (0..8).contains(&nf) && (0..8).contains(&nr) && own_pawns & (1u64 << (nr * 8 + nf)) == 0 {
+                    free = true;
+                    break;
+                }
+            }
+            if !free {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn is_locked_fortress(board: &Board) -> bool {
     let occ = board.occupied().0;
     let wp = board.colored_pieces(Color::White, Piece::Pawn).0;

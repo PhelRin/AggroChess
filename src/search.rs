@@ -10,10 +10,10 @@
 //! * Draws are scored with contempt from the engine's point of view.
 
 use crate::eval::{self, SEE_VALUE};
-use crate::nnue::Accumulator;
+use crate::nnue::{self, Accumulator};
 use cozy_chess::{BitBoard, Board, Color, Move, Piece, Square};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 pub const MAX_PLY: usize = 128;
@@ -785,6 +785,52 @@ pub static ZUGZWANG_GUARD: AtomicBool = AtomicBool::new(false);
 /// only trusted after a reduced search without the null move for that side confirms it.
 /// 0 = off.
 pub static NULL_VERIFY: AtomicI32 = AtomicI32::new(0);
+/// See `disagree` in the search: the static verdict's lead over the window from which later
+/// moves are searched without reductions in a long think. 0 = off, which is the default: it
+/// is part of the work on Smyslov's 1.f6!! and is used when labelling training positions
+/// (`label` switches it on), not yet in play.
+pub static DISAGREE_MARGIN: AtomicI32 = AtomicI32::new(0);
+/// Second look: a fall of at least this many centipawns between two depths of a long think
+/// is searched again with an empty table (0 = off).
+pub static COLLAPSE_LOOK: AtomicI32 = AtomicI32::new(0);
+/// Training tool (AGGRO_EVALDUMP=<file>, AGGRO_EVALDUMP_N=<n>): every n-th position the search
+/// evaluates is written to the file, to get positions out of real search trees (used as
+/// anchors when the net is trained further, see trainer/themes).
+pub static EVAL_DUMP: AtomicBool = AtomicBool::new(false);
+static EVAL_DUMP_COUNT: AtomicU64 = AtomicU64::new(0);
+static EVAL_DUMP_EVERY: AtomicU64 = AtomicU64::new(1000);
+static EVAL_DUMP_FILE: Mutex<Option<std::io::BufWriter<std::fs::File>>> = Mutex::new(None);
+
+pub fn init_eval_dump() {
+    if let Ok(path) = std::env::var("AGGRO_EVALDUMP") {
+        let f = std::fs::OpenOptions::new().create(true).append(true).open(path).expect("AGGRO_EVALDUMP file");
+        *EVAL_DUMP_FILE.lock().unwrap() = Some(std::io::BufWriter::new(f));
+        if let Some(n) = std::env::var("AGGRO_EVALDUMP_N").ok().and_then(|v| v.parse().ok()) {
+            EVAL_DUMP_EVERY.store(n, Ordering::Relaxed);
+        }
+        EVAL_DUMP.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn flush_eval_dump() {
+    use std::io::Write;
+    if let Some(f) = EVAL_DUMP_FILE.lock().unwrap().as_mut() {
+        let _ = f.flush();
+    }
+}
+
+#[cold]
+fn dump_eval_position(board: &Board) {
+    use std::io::Write;
+    if EVAL_DUMP_COUNT.fetch_add(1, Ordering::Relaxed) % EVAL_DUMP_EVERY.load(Ordering::Relaxed) == 0 {
+        if let Some(f) = EVAL_DUMP_FILE.lock().unwrap().as_mut() {
+            let _ = writeln!(f, "{}", board);
+        }
+    }
+}
+
+/// Debug: print every root move's score (AGGRO_DBGROOT=1).
+pub static DBG_ROOT: AtomicBool = AtomicBool::new(false);
 pub static NULL_VERIFY_DEPTH: AtomicI32 = AtomicI32::new(8);
 /// Recognise stalemate fortresses (boxed-in king, frozen pawns, one piece left).
 pub static STALEMATE_BOX: AtomicBool = AtomicBool::new(true);
@@ -792,7 +838,7 @@ pub static STALEMATE_BOX: AtomicBool = AtomicBool::new(true);
 /// time goes to searching up to RESCUE_MAX material-returning moves on their own.
 pub static RESCUE: AtomicBool = AtomicBool::new(true);
 pub static RESCUE_BELOW: AtomicI32 = AtomicI32::new(100);
-pub static RESCUE_PCT: AtomicI32 = AtomicI32::new(70);
+pub static RESCUE_PCT: AtomicI32 = AtomicI32::new(85);
 pub static RESCUE_MAX: AtomicI32 = AtomicI32::new(5);
 /// Rescue look, first a short look at every giveaway (this share of the look's time, %), and
 /// the ones more than RESCUE_DROP below the main move are dropped.
@@ -1072,6 +1118,8 @@ pub struct Searcher {
     /// null-move verification: no null move for `nmp_color` before this ply
     nmp_min_ply: usize,
     nmp_color: Color,
+    /// How often this search has cleared the table for a second look (see `aspiration`).
+    second_looks: u32,
 }
 
 #[inline]
@@ -1117,6 +1165,7 @@ impl Searcher {
             root_only: Vec::new(),
             nmp_min_ply: 0,
             nmp_color: Color::White,
+            second_looks: 0,
             mate: None,
             mate_probed: std::collections::HashMap::new(),
             mate_base: 0,
@@ -1147,6 +1196,9 @@ impl Searcher {
     /// Static evaluation from the side to move's point of view.
     #[inline]
     fn static_eval(&mut self, board: &Board, ply: usize) -> i32 {
+        if EVAL_DUMP.load(Ordering::Relaxed) {
+            dump_eval_position(board);
+        }
         if FORTRESS.load(Ordering::Relaxed)
             && deep()
             && (eval::is_locked_fortress(board) || (SEALED.load(Ordering::Relaxed) && eval::is_sealed_fortress(board)))
@@ -1170,10 +1222,17 @@ impl Searcher {
             {
                 return eval::evaluate(board);
             }
-            self.ensure_acc(board, ply);
-            let mut nn = self.acc[ply].evaluate(board);
+            // opposite-coloured bishop endings with a buried bishop have a net of their own
+            // (see nnue.rs)
+            let ocb = eval::ocb_scale(board);
+            let mut nn = if ocb.is_some() && nnue::OCB_NET_ON.load(Ordering::Relaxed) && eval::buried_bishop(board) {
+                nnue::evaluate_ocb(board)
+            } else {
+                self.ensure_acc(board, ply);
+                self.acc[ply].evaluate(board)
+            };
             if OCB_SCALE.load(Ordering::Relaxed) && deep() {
-                if let Some(f) = eval::ocb_scale(board) {
+                if let Some(f) = ocb {
                     nn = nn * f / 64;
                 }
             }
@@ -1673,6 +1732,28 @@ impl Searcher {
             0
         };
         let mut enemy_net: Option<bool> = None;
+        // Long thinks: the static verdict says the side to move is far above the window, and
+        // yet this node is still looking for a move (no null-move or first-move cutoff). That
+        // is what a zugzwang battle looks like from inside (Smyslov's 1.f6!!: a rook tied up
+        // for twenty moves while both sides count pawn tempi); it only applies in endgames
+        // without queens, with at most a rook and a minor piece a side, and for a side that
+        // is not ahead in material (its lead is a bind, not a count; otherwise such nodes are
+        // tactics, and plentiful). The later moves are then not
+        // reduced or pruned: a reduced look refutes the one winning tempo move with a bound
+        // left in the table by a shallower search, at every depth, for as long as it is reduced.
+        let disagree = {
+            let margin = DISAGREE_MARGIN.load(Ordering::Relaxed);
+            margin > 0
+                && deep()
+                && !root
+                && !in_check
+                && static_eval != EVAL_NONE
+                && static_eval >= alpha + margin
+                && board.pieces(Piece::Queen).is_empty()
+                && eval::non_pawn_material(board, Color::White) <= 850
+                && eval::non_pawn_material(board, Color::Black) <= 850
+                && eval::material_balance(board, stm) <= 0
+        };
 
         let root_filter: Vec<Move> = if !root {
             Vec::new()
@@ -1720,7 +1801,7 @@ impl Searcher {
             let hist = if quiet { self.quiet_score(board, m, ply) } else { 0 };
 
             // ---- pruning at shallow depth ----
-            if !noprune(8) && !root && best_score > -MATE_BOUND && has_pieces && !boxed {
+            if !noprune(8) && !root && best_score > -MATE_BOUND && has_pieces && !boxed && !disagree {
                 let lmr_d = (depth - 1 - self.lmr[depth.min(63) as usize][move_count.min(63)]).max(0);
                 if quiet && !gives_check {
                     let lmp = move_count as i32 > lmp_limit && !attacks_zone;
@@ -1887,7 +1968,7 @@ impl Searcher {
                 && depth >= 10
                 && ROOT_DRAW_ESCAPE.load(Ordering::Relaxed) > 0
                 && (best_score == draw_here || (best_score > -INF && best_score <= -ROOT_FULL_BELOW.load(Ordering::Relaxed)));
-            if !noprune(16) && depth >= 3 && move_count > 1 + root as usize && (quiet || !see_ge(board, m, 0)) && !full_sac && !no_draw_lmr && !boxed {
+            if !noprune(16) && depth >= 3 && move_count > 1 + root as usize && (quiet || !see_ge(board, m, 0)) && !full_sac && !no_draw_lmr && !boxed && !disagree {
                 let mut r = self.lmr[depth.min(63) as usize][move_count.min(63)];
                 if !improving {
                     r += 1;
@@ -1981,6 +2062,9 @@ impl Searcher {
 
             if self.stop.load(Ordering::Relaxed) {
                 return 0;
+            }
+            if root && DBG_ROOT.load(Ordering::Relaxed) {
+                eprintln!("dbgroot d{} {} score {} window [{}, {}] best {} nodes {}", depth, m, score, alpha, beta, best_score, self.nodes);
             }
 
             if score > best_score {
@@ -3395,29 +3479,52 @@ fn aspiration(s: &mut Searcher, board: &Board, depth: i32, prev: i32) -> i32 {
         let hi = it.next().unwrap_or(lo + 1);
         return s.search(board, depth, lo, hi, 0, false);
     }
-    let mut delta = 20;
-    let (mut alpha, mut beta) = if depth >= 5 && prev.abs() < MATE_BOUND {
-        (prev - delta, prev + delta)
-    } else {
-        (-INF, INF)
-    };
+    let mut second_look = false;
     loop {
-        let score = s.search(board, depth, alpha, beta, 0, false);
-        if s.stop.load(Ordering::Relaxed) {
-            return score;
-        }
-        if score <= alpha {
-            beta = (alpha + beta) / 2;
-            alpha = (score - delta).max(-INF);
-        } else if score >= beta {
-            beta = (score + delta).min(INF);
+        let mut delta = 20;
+        let (mut alpha, mut beta) = if depth >= 5 && prev.abs() < MATE_BOUND {
+            (prev - delta, prev + delta)
         } else {
+            (-INF, INF)
+        };
+        let score = loop {
+            let score = s.search(board, depth, alpha, beta, 0, false);
+            if s.stop.load(Ordering::Relaxed) {
+                return score;
+            }
+            if score <= alpha {
+                beta = (alpha + beta) / 2;
+                alpha = (score - delta).max(-INF);
+            } else if score >= beta {
+                beta = (score + delta).min(INF);
+            } else {
+                break score;
+            }
+            delta += delta;
+            if delta > 1000 {
+                alpha = -INF;
+                beta = INF;
+            }
+        };
+        // Second look (long thinks): when the score collapses from one depth to the next, the
+        // fall is searched once more with an empty table. In positions decided by zugzwang a
+        // chain of shallow fail-low bounds left in the table can keep "refuting" the winning
+        // move at every later depth without ever being searched again (the null move's
+        // reduction grows with the depth, so the old entries always look deep enough).
+        let fall = COLLAPSE_LOOK.load(Ordering::Relaxed);
+        if second_look
+            || fall <= 0
+            || !deep()
+            || depth < 10
+            || prev.abs() >= MATE_BOUND
+            || score.abs() >= MATE_BOUND
+            || score > prev - fall
+            || s.second_looks >= 3
+        {
             return score;
         }
-        delta += delta;
-        if delta > 1000 {
-            alpha = -INF;
-            beta = INF;
-        }
+        second_look = true;
+        s.second_looks += 1;
+        s.tt.clear();
     }
 }
