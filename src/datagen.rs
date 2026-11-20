@@ -183,6 +183,7 @@ pub fn label(args: &[String]) {
     search::NULL_VERIFY.store(envi("AGGRO_NULLVERIFY", 3), Ordering::Relaxed);
     search::NULL_VERIFY_DEPTH.store(envi("AGGRO_NULLVDEPTH", 6), Ordering::Relaxed);
     search::DEEP.store(envi("AGGRO_LABEL_DEEP", 1) != 0, Ordering::Relaxed);
+    search::DISAGREE_MARGIN.store(envi("AGGRO_LABEL_DISAGREE", 400), Ordering::Relaxed);
 
     let boards: Vec<Board> = fens.lines().filter_map(|l| Board::from_fen(l.split(';').next().unwrap_or("").trim(), false).ok()).collect();
     let boards = Arc::new(boards);

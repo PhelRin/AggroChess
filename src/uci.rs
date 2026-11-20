@@ -286,6 +286,9 @@ pub fn uci_loop() {
                                 search::DRAW_ESCAPE.store(v, Ordering::Relaxed);
                             }
                         }
+                        "x_ocbnet" => {
+                            crate::nnue::OCB_NET_ON.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
+                        }
                         "x_disagree" => {
                             if let Ok(v) = value.trim().parse::<i32>() {
                                 search::DISAGREE_MARGIN.store(v, Ordering::Relaxed);

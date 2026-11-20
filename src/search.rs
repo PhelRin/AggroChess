@@ -10,7 +10,7 @@
 //! * Draws are scored with contempt from the engine's point of view.
 
 use crate::eval::{self, SEE_VALUE};
-use crate::nnue::Accumulator;
+use crate::nnue::{self, Accumulator};
 use cozy_chess::{BitBoard, Board, Color, Move, Piece, Square};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -786,8 +786,10 @@ pub static ZUGZWANG_GUARD: AtomicBool = AtomicBool::new(false);
 /// 0 = off.
 pub static NULL_VERIFY: AtomicI32 = AtomicI32::new(0);
 /// See `disagree` in the search: the static verdict's lead over the window from which later
-/// moves are searched without reductions in a long think (0 = off).
-pub static DISAGREE_MARGIN: AtomicI32 = AtomicI32::new(400);
+/// moves are searched without reductions in a long think. 0 = off, which is the default: it
+/// is part of the work on Smyslov's 1.f6!! and is used when labelling training positions
+/// (`label` switches it on), not yet in play.
+pub static DISAGREE_MARGIN: AtomicI32 = AtomicI32::new(0);
 /// Second look: a fall of at least this many centipawns between two depths of a long think
 /// is searched again with an empty table (0 = off).
 pub static COLLAPSE_LOOK: AtomicI32 = AtomicI32::new(0);
@@ -836,7 +838,7 @@ pub static STALEMATE_BOX: AtomicBool = AtomicBool::new(true);
 /// time goes to searching up to RESCUE_MAX material-returning moves on their own.
 pub static RESCUE: AtomicBool = AtomicBool::new(true);
 pub static RESCUE_BELOW: AtomicI32 = AtomicI32::new(100);
-pub static RESCUE_PCT: AtomicI32 = AtomicI32::new(70);
+pub static RESCUE_PCT: AtomicI32 = AtomicI32::new(85);
 pub static RESCUE_MAX: AtomicI32 = AtomicI32::new(5);
 /// Rescue look, first a short look at every giveaway (this share of the look's time, %), and
 /// the ones more than RESCUE_DROP below the main move are dropped.
@@ -1220,10 +1222,17 @@ impl Searcher {
             {
                 return eval::evaluate(board);
             }
-            self.ensure_acc(board, ply);
-            let mut nn = self.acc[ply].evaluate(board);
+            // opposite-coloured bishop endings with a buried bishop have a net of their own
+            // (see nnue.rs)
+            let ocb = eval::ocb_scale(board);
+            let mut nn = if ocb.is_some() && nnue::OCB_NET_ON.load(Ordering::Relaxed) && eval::buried_bishop(board) {
+                nnue::evaluate_ocb(board)
+            } else {
+                self.ensure_acc(board, ply);
+                self.acc[ply].evaluate(board)
+            };
             if OCB_SCALE.load(Ordering::Relaxed) && deep() {
-                if let Some(f) = eval::ocb_scale(board) {
+                if let Some(f) = ocb {
                     nn = nn * f / 64;
                 }
             }
