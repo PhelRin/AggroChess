@@ -1726,12 +1726,24 @@ impl Searcher {
         // Long thinks: the static verdict says the side to move is far above the window, and
         // yet this node is still looking for a move (no null-move or first-move cutoff). That
         // is what a zugzwang battle looks like from inside (Smyslov's 1.f6!!: a rook tied up
-        // for twenty moves while both sides count pawn tempi). The later moves are then not
+        // for twenty moves while both sides count pawn tempi); it only applies in endgames
+        // without queens, with at most a rook and a minor piece a side, and for a side that
+        // is not ahead in material (its lead is a bind, not a count; otherwise such nodes are
+        // tactics, and plentiful). The later moves are then not
         // reduced or pruned: a reduced look refutes the one winning tempo move with a bound
         // left in the table by a shallower search, at every depth, for as long as it is reduced.
         let disagree = {
             let margin = DISAGREE_MARGIN.load(Ordering::Relaxed);
-            margin > 0 && deep() && !root && !in_check && static_eval != EVAL_NONE && static_eval >= alpha + margin
+            margin > 0
+                && deep()
+                && !root
+                && !in_check
+                && static_eval != EVAL_NONE
+                && static_eval >= alpha + margin
+                && board.pieces(Piece::Queen).is_empty()
+                && eval::non_pawn_material(board, Color::White) <= 850
+                && eval::non_pawn_material(board, Color::Black) <= 850
+                && eval::material_balance(board, stm) <= 0
         };
 
         let root_filter: Vec<Move> = if !root {
