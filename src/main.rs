@@ -19,9 +19,17 @@ fn main() {
     search::NUM_THREADS.store(default_threads, std::sync::atomic::Ordering::Relaxed);
 
     // Optional: `aggro_chess bench` prints a fixed-depth node count / speed figure.
+    search::init_eval_dump();
+    if std::env::var("AGGRO_DBGROOT").is_ok() {
+        search::DBG_ROOT.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "datagen" {
         datagen::run(&args[2..]);
+        return;
+    }
+    if args.len() > 1 && args[1] == "packfens" {
+        datagen::packfens(&args[2..]);
         return;
     }
     if args.len() > 1 && args[1] == "label" {

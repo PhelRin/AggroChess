@@ -243,6 +243,24 @@ pub fn label(args: &[String]) {
     eprintln!("labelled {} positions in {:.0}s", done.load(Ordering::Relaxed), start.elapsed().as_secs_f64());
 }
 
+/// `packfens <labels.txt> <out.bin>`: turns "fen;score" lines (White's view, as the label
+/// command logs them) back into training records, so label sets can be merged and filtered
+/// as text.
+pub fn packfens(args: &[String]) {
+    let text = std::fs::read_to_string(&args[0]).expect("label list");
+    let mut out = std::io::BufWriter::new(std::fs::File::create(&args[1]).expect("output"));
+    let mut n = 0;
+    for line in text.lines() {
+        let mut it = line.split(';');
+        let (Some(fen), Some(score)) = (it.next(), it.next()) else { continue };
+        let (Ok(board), Ok(white)) = (Board::from_fen(fen.trim(), false), score.trim().parse::<i32>()) else { continue };
+        let result = if white >= 400 { 2 } else if white <= -400 { 0 } else { 1 };
+        out.write_all(&pack(&board, white.clamp(-4000, 4000) as i16, result)).unwrap();
+        n += 1;
+    }
+    eprintln!("{} records", n);
+}
+
 fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>, games: Arc<AtomicU64>) {
     let mut rng = Rng(seed);
     let sac_pct: u64 = std::env::var("AGGRO_SACS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
