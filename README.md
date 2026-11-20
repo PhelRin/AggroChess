@@ -13,10 +13,11 @@
 * **A queen left hanging is a sacrifice.** At a long think, a move that leaves a rook or the queen to be taken (and not simply won back) gets half the sacrifice bonus, wherever it is aimed.
 * **A piece for two pawns is a sacrifice** (it used to fall just under the two-pawn limit).
 * **Quiet tries:** Tal's look also searches quiet moves whose own main line goes on with a sacrifice. That solves Amann's study (1.Qd8!! and 2.Qf6!!).
-* **Stalemate fortresses without a material lead** (the 1.Rxh1!! study): ten of the twelve "impossible" studies in `tests/` are now solved, two more than v4.5.1.
+* **Stalemate fortresses without a material lead** (the 1.Rxh1!! study).
+* **A second network for buried bishops** (Salai's 1.f4!!): opposite-coloured bishop endings in which one bishop cannot move are judged by a small network of their own, trained on long AggroChess searches of such positions (`trainer/themes/`). Eleven of the twelve "impossible" studies in `tests/` are now solved, three more than v4.5.1.
 * **The Göring Gambit** is in the book, and `go movetime 4000` now counts as a 4-second think (it used to miss the long-think features by 50 ms).
 
-Against v4.5.1 at 10 s + 0.1 s (200 games, every game played to the end): **98 W / 15 D / 87 L (52.8%), about +19 Elo**, with a sacrifice in all 200 games.
+Against v4.5.1 at 10 s + 0.1 s (400 games over two runs, every game played to the end): **187 W / 28 D / 185 L (50.3%)**, with a sacrifice in 398 of the 400 games.
 
 ## What's new in v4.5: sharper eyes
 
@@ -136,6 +137,7 @@ AggroChess is deliberately weaker than it could be: its speculative sacrifices m
 ## Under the hood
 
 * **Evaluation (`src/nnue.rs`, `src/eval.rs`):** an NNUE with 768 inputs (piece and square), a 256-neuron hidden layer for each side, SCReLU activation and 8 output buckets by the number of pieces on the board, updated incrementally as the search makes moves. The personality layer from the classical evaluation (king danger it creates against *your* king at 220%, trade aversion, pieces aimed at the king, heavy pieces on open files near the king) is added on top. The classical evaluation (PeSTO tables, pawn structure, mobility, threats, the king-danger model) is still in the code: it labelled the first round of training data, and it takes over against a bare king and in pawnless endgames with five pieces or fewer (such as rook against bare king, or queen against rook), where its mop-up knows how to drive the king into a corner and the network, which saw few of those positions, does not.
+* **A second network (`aggro-ocb.nnue`):** opposite-coloured bishop endings in which one bishop is buried behind its own pawns are judged by a network of their own (same shape, the main network trained further). The positions it learned from were labelled by long AggroChess searches, not by game results; `trainer/themes/` has the recipe. The main network is used everywhere else, unchanged.
 * **Training (`src/datagen.rs`, `trainer/`):** `aggro_chess datagen` plays self-play games from random openings with the personality off and writes quiet positions with the search score and the game result; the trainer (plain Rust, no outside libraries) learns from a blend of the two and writes `aggro.nnue`, which is built into the engine.
 * **Search (`src/search.rs`):** iterative deepening, aspiration windows, principal variation search, a lock-free shared hash table and Lazy SMP multi-threading. Null-move pruning, reverse futility pruning, razoring, late move reductions and pruning, futility pruning and singular extensions. Static-exchange pruning is depth-limited and lenient for moves into the enemy king zone, so sacrifices get searched deeply enough to be proven. Check extensions, quiet checks in quiescence search, and killer, counter-move, history and continuation-history move ordering. Time management with soft and hard limits that adapts to how stable the best move is.
 
