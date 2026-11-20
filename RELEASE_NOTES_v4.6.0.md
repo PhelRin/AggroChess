@@ -73,8 +73,8 @@ Against v4.5.1, 100 balanced openings played from both sides, every game played 
 So v4.6 is about as strong as v4.5.1, not measurably stronger: the changes are about which sacrifices it finds. Fast games only differ by the piece-for-two-pawns rule and the book. In the long-think match, the three games without a counted sacrifice were two wins in which it only gave material up for a move or two and won it straight back, and one loss in 23 moves.
 
 ## Downloads
-- `aggro_chess.exe`: Windows x64.
-- `aggro_chess-linux-x86_64`: Linux x64 (new; a static build that needs nothing installed). Run `chmod +x aggro_chess-linux-x86_64` once.
-- `AggroChess-4.6.0-wasm.zip`: the WebAssembly build for web projects, with a README and an example worker.
+- `aggro_chess.exe`: Windows x64. SHA-256: `2993ddd085ea9e9f1a79508ca98cfd89fbb6a5c39581f043bdbc1e742e0c2ba4`
+- `aggro_chess-linux-x86_64`: Linux x64 (new; a static build that needs nothing installed). Run `chmod +x aggro_chess-linux-x86_64` once. SHA-256: `c991e9c44f884dc4e5724917d7e266a6f425480fac44202ef799825dd7422b1c`
+- `AggroChess-4.6.0-wasm.zip`: the WebAssembly build for web projects, with a README and an example worker. SHA-256: `b342efaa7aa85d23b91f107fcd60af042bda0b8b1dc68b554a277bbf3aee7886`
 
 The exe and the Linux binary are standard UCI engines with the network built in, for Coliseum, Arena, Cute Chess, BanksiaGUI or lichess-bot. The options are still only `Threads` and `BookPath`.
