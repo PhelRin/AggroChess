@@ -17,7 +17,9 @@
 * **A second network for buried bishops** (Salai's 1.f4!!): opposite-coloured bishop endings in which one bishop cannot move are judged by a small network of their own, trained on long AggroChess searches of such positions (`trainer/themes/`). Eleven of the twelve "impossible" studies in `tests/` are now solved, three more than v4.5.1.
 * **The Göring Gambit** is in the book, and `go movetime 4000` now counts as a 4-second think (it used to miss the long-think features by 50 ms).
 
-Against v4.5.1 at 10 s + 0.1 s (400 games over two runs, every game played to the end): **187 W / 28 D / 185 L (50.3%)**, with a sacrifice in 398 of the 400 games.
+Against v4.5.1 at 10 s + 0.1 s (400 games over two runs, every game played to the end): **187 W / 28 D / 185 L (50.3%)**.
+
+**v4.6.1** changes what counts as a sacrifice: the mover is at least 1.5 pawns down after the reply, so the exchange counts, and material won back by force still counts; taking back on the same square is a trade and does not. AggroChess counts its own sacrifices the same way. With that rule it sacrificed in 198 of 200 games against v4.5.1 (the two without one were over in 21 and 27 moves). The release notes also give how often each study is solved over 8 runs.
 
 ## What's new in v4.5: sharper eyes
 
