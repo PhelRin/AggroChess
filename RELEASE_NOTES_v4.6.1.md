@@ -54,8 +54,8 @@ So the count is where it was, at about 99%, and the strength is unchanged. The g
 A puzzles page: pick a study and watch the engine think about it in the browser. The browser build is slower than the desktop engine, so each study has its own think time (30 to 90 seconds); with those it finds 11 of the 12.
 
 ## Downloads
-- `aggro_chess.exe`: Windows x64. SHA-256: `@WIN@`
-- `aggro_chess-linux-x86_64`: Linux x64 (a static build that needs nothing installed). Run `chmod +x aggro_chess-linux-x86_64` once. SHA-256: `@LIN@`
-- `AggroChess-4.6.1-wasm.zip`: the WebAssembly build for web projects, with a README and an example worker. SHA-256: `@WASM@`
+- `aggro_chess.exe`: Windows x64.
+- `aggro_chess-linux-x86_64`: Linux x64 (a static build that needs nothing installed). Run `chmod +x aggro_chess-linux-x86_64` once. SHA-256: `508be152053d08129458bb98a1cbb0303cde227201d44995f2401bcc16320493`
+- `AggroChess-4.6.1-wasm.zip`: the WebAssembly build for web projects, with a README and an example worker. SHA-256: `9c5fa3582a654dad466c493aff08abbb1fa946d8ab7e1c7a893d15c399949b30`
 
 The options are still only `Threads` and `BookPath`.
