@@ -1319,33 +1319,36 @@ pub fn dead_bishop_adj(board: &Board, cp: i32) -> i32 {
     adj
 }
 
-/// Stalemate fortress (the Rxh1!/Nc6! studies): the side that is behind has a king without a
-/// single move, pawns that can never move, and one piece left. Taking that piece stalemates
-/// it, so the extra material is worth little: the material balance is scaled down (n/64).
-/// The attacker has to free the king (and the search sees whether that wins). Only when the
-/// attacker has at most a rook or minor piece, so mating attacks are not confused with this.
-pub fn stalemate_box_scale(board: &Board) -> Option<i32> {
-    let strong = if material_balance(board, Color::White) >= 250 {
-        Color::White
-    } else if material_balance(board, Color::Black) >= 250 {
-        Color::Black
-    } else {
-        return None;
-    };
-    let weak = !strong;
-    if non_pawn_material(board, strong) > 600 {
-        return None;
+/// Stalemate fortress (the Rxh1!/Nc6! studies): one side has a king without a single move,
+/// pawns that can never move, and one piece left. Taking that piece stalemates it, so whatever
+/// the other side has extra (material, or just passed pawns) is worth little: when the boxed
+/// side stands worse, its evaluation is scaled down (n/64). The attacker has to free the king
+/// (and the search sees whether that wins). Only when the attacker has at most a rook or minor
+/// piece, so mating attacks are not confused with this. Returns the boxed side and the scale.
+pub fn stalemate_box_scale(board: &Board) -> Option<(Color, i32)> {
+    for weak in [Color::White, Color::Black] {
+        if stalemate_boxed(board, weak) {
+            return Some((weak, STALEMATE_BOX_SCALE.load(std::sync::atomic::Ordering::Relaxed)));
+        }
     }
+    None
+}
+
+pub fn stalemate_boxed(board: &Board, weak: Color) -> bool {
+    let strong = !weak;
     let pieces = board.colors(weak) & !board.pieces(Piece::Pawn) & !board.pieces(Piece::King);
     if pieces.len() != 1 {
-        return None;
+        return false;
+    }
+    if non_pawn_material(board, strong) > 600 {
+        return false;
     }
     let occ = board.occupied().0;
     // the weak pawns never move: blocked, nothing to take
     let wp = board.colored_pieces(weak, Piece::Pawn).0;
     let strong_bb = board.colors(strong).0;
     if forward(wp, weak) & !occ != 0 || pawn_attacks(wp, weak) & strong_bb != 0 {
-        return None;
+        return false;
     }
     // the weak king has no square: all of them occupied by its own men or attacked
     let mut att = 0u64;
@@ -1363,10 +1366,7 @@ pub fn stalemate_box_scale(board: &Board) -> Option<i32> {
     }
     let k = board.king(weak);
     let free = cozy_chess::get_king_moves(k).0 & !board.colors(weak).0 & !att;
-    if free != 0 || att & k.bitboard().0 != 0 {
-        return None;
-    }
-    Some(STALEMATE_BOX_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+    free == 0 && att & k.bitboard().0 == 0
 }
 /// What is left of the evaluation in a stalemate box (out of 64).
 pub static STALEMATE_BOX_SCALE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(8);

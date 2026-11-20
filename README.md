@@ -1,10 +1,22 @@
-# AggroChess v4.5.0 ⚔️
+# AggroChess v4.6.0 ⚔️
 
 **AggroChess** is an aggressive, sacrificial chess engine written in Rust, in the spirit of Mikhail Tal. It is built to be *fun to play against*: it castles into attacks, throws pawns at your king, keeps pieces on the board, avoids draws, and will happily give up material to rip your king open. The goal is not to beat Stockfish. The goal is to play the kind of chess people enjoy losing to (and occasionally beating).
 
 **Play it in your browser:** https://playaggro.netlify.app/ (game review, clocks, premoves, play-from-any-position, share links and highlight clips).
 
-**Use it in a chess GUI:** download `aggro_chess.exe` from the latest release. It's a standard UCI engine, so it works in Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot and others.
+**Use it in a chess GUI:** download `aggro_chess.exe` (Windows) or `aggro_chess-linux-x86_64` (Linux) from the latest release. It's a standard UCI engine, so it works in Coliseum, Arena, Cute Chess, BanksiaGUI, lichess-bot and others. The release also has the WebAssembly build for web projects.
+
+## What's new in v4.6: the classics
+
+**It plays the famous sacrifices.** Morphy's 10.Nxb5 and 13.Rxd7 from the Opera Game, Fischer's 11...Na4 and 17...Be6 against Byrne, the Evergreen Game's 20.Rxe7+, Kasparov's 24.Rxd4 against Topalov, the Greek gift, the Evans and Göring Gambits: 12 of 12 at 30 seconds on one core (v4.5.1: 9). The positions are in `tests/famous.epd`; they follow an independent test of v4.5.0.
+
+* **A queen left hanging is a sacrifice.** At a long think, a move that leaves a rook or the queen to be taken (and not simply won back) gets half the sacrifice bonus, wherever it is aimed.
+* **A piece for two pawns is a sacrifice** (it used to fall just under the two-pawn limit).
+* **Quiet tries:** Tal's look also searches quiet moves whose own main line goes on with a sacrifice. That solves Amann's study (1.Qd8!! and 2.Qf6!!).
+* **Stalemate fortresses without a material lead** (the 1.Rxh1!! study): ten of the twelve "impossible" studies in `tests/` are now solved, two more than v4.5.1.
+* **The Göring Gambit** is in the book, and `go movetime 4000` now counts as a 4-second think (it used to miss the long-think features by 50 ms).
+
+Against v4.5.1 at 10 s + 0.1 s (200 games, every game played to the end): **98 W / 15 D / 87 L (52.8%), about +19 Elo**, with a sacrifice in all 200 games.
 
 ## What's new in v4.5: sharper eyes
 

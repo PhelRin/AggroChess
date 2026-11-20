@@ -59,10 +59,14 @@ pub(crate) static LINES: &[(char, u32, &str)] = &[
     // ---- Halloween Gambit: objectively dubious (a knight for a pawn), but Black has to know it ----
     ('W', 30, "e4{100} e5 Nf3{60} Nc6 Nc3{30} Nf6 Nxe5 Nxe5 d4 Ng6 e5 Ng8 Bc4"),
     ('W', 30, "e4{100} e5 Nf3{60} Nc6 Nc3{30} Nf6 Nxe5 Nxe5 d4 Nc6 e5"),
-    // ---- Scotch Gambit ----
-    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 Bc4 Nf6 e5 d5 Bb5 Ne4 Nxd4 Bd7 Bxc6 bxc6 O-O"),
-    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 Bc4 Bc5 c3 Nf6"),
-    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 Bc4 Bb4+ c3 dxc3 O-O cxb2 Bxb2"),
+    // ---- Goring Gambit (4.c3; with 5.Bc4 it offers a second pawn) ----
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 dxc3 Bc4{60} cxb2 Bxb2 Bb4+ Nc3 Nf6 Qc2 d6 O-O-O"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 dxc3 Bc4{60} d6 Nxc3 Nf6 Qb3 Qd7 Ng5 Ne5 Bb5 c6 f4"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 dxc3 Nxc3{40} Bb4 Bc4 d6 O-O"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 d5 exd5 Qxd5 cxd4 Bg4 Be2 Bb4+ Nc3"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 Nf6 e5 Nd5 cxd4"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 Nf6 e5 Ne4 Qe2"),
+    ('W', 60, "e4{100} e5 Nf3{60} Nc6 d4{40} exd4 c3 d3 Bxd3 d6 O-O"),
     // vs other 2nd moves after 2.Nf3
     ('W', 70, "e4{100} e5 Nf3{60} Nf6 Nxe5 Nc6 Nxc6 dxc6 d3 Bc5 Be2 h5"),
     ('W', 70, "e4{100} e5 Nf3{60} Nf6 Nxe5 d6 Nf3 Nxe4 Nc3 Nxc3 dxc3 Be7 Be3 Nc6 Qd2 O-O O-O-O"),
@@ -679,7 +683,7 @@ mod queen_trades {
                     eval::AGGRESSION.store(a, Ordering::Relaxed);
                     search::SACRIFICE_BONUS.store(sb, Ordering::Relaxed);
                     search::CONTEMPT.store(c, Ordering::Relaxed);
-                    let limits = search::Limits { depth: Some(12), soft: Some(std::time::Duration::from_millis(250)), hard: Some(std::time::Duration::from_millis(400)), nodes: None };
+                    let limits = search::Limits { depth: Some(12), soft: Some(std::time::Duration::from_millis(250)), hard: Some(std::time::Duration::from_millis(400)), nodes: None, asked: None };
                     let (m, _) = search::search_position(&board, &hist, limits, Arc::new(AtomicBool::new(false)), false);
                     let Some(m) = m else { break };
                     tail.push(format!("{}", cozy_chess::util::display_san_move(&board, m)));

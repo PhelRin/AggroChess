@@ -73,7 +73,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 4.5.1");
+                out!("id name AggroChess 4.6.0");
                 out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -133,6 +133,14 @@ pub fn uci_loop() {
                             if let Ok(v) = value.trim().parse::<i32>() {
                                 search::DEAD_BISHOP.store(v, Ordering::Relaxed);
                             }
+                        }
+                        "x_quiettries" => {
+                            if let Ok(v) = value.trim().parse::<i32>() {
+                                search::QUIET_TRIES.store(v, Ordering::Relaxed);
+                            }
+                        }
+                        "x_hangsacs" => {
+                            search::HANG_SACS.store(value.trim().eq_ignore_ascii_case("true"), Ordering::Relaxed);
                         }
                         "x_rootbelow" => {
                             if let Ok(v) = value.trim().parse::<i32>() {
@@ -561,6 +569,7 @@ pub fn uci_loop() {
                     let t = Duration::from_millis(mt.saturating_sub(move_overhead).max(1));
                     limits.soft = Some(t);
                     limits.hard = Some(t);
+                    limits.asked = Some(Duration::from_millis(mt));
                 } else if !infinite {
                     let (time, inc) = if board.side_to_move() == Color::White { (wtime, winc) } else { (btime, binc) };
                     if let Some(time) = time {
@@ -608,6 +617,7 @@ pub fn uci_loop() {
             }
             "d" => {
                 out!("{}", board);
+                out!("stalemate box: {:?}", crate::eval::stalemate_box_scale(&board));
                 out!("eval (side to move): {} (nnue {}, personality {}, classical {})", crate::nnue::evaluate_fresh(&board) + crate::eval::personality(&board), crate::nnue::evaluate_fresh(&board), crate::eval::personality(&board), crate::eval::evaluate(&board));
             }
             _ => {}
