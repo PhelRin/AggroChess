@@ -543,4 +543,27 @@ mod nnue_tests {
             }
         }
     }
+    #[test]
+    fn buried_bishop_is_recognised() {
+        // Salai's study after 4...cxb4: Black's bishop on a5 sits behind b6 and b4
+        let b = cozy_chess::Board::from_fen("6k1/8/1pK4p/bP6/1p6/8/P1B2P2/8 w - - 0 5", false).unwrap();
+        assert!(crate::eval::buried_bishop(&b));
+        assert!(crate::nnue::is_ocb(&b));
+        // the starting position of the study: both bishops can move
+        let b = cozy_chess::Board::from_fen("4K1k1/8/1p5p/1Pp3b1/8/1P3P2/P1B2P2/8 w - - 0 1", false).unwrap();
+        assert!(!crate::eval::buried_bishop(&b));
+        assert!(!crate::nnue::is_ocb(&b));
+        // a buried bishop with rooks on the board is not the second net's business
+        let b = cozy_chess::Board::from_fen("6k1/8/1pK4p/bP6/1p6/8/P1B2P2/R6r w - - 0 5", false).unwrap();
+        assert!(!crate::nnue::is_ocb(&b));
+    }
+
+    #[test]
+    fn buried_bishop_ending_is_judged_by_the_second_net() {
+        // one f-pawn wins (the spare tempo f2-f3), the doubled f-pawns do not: the second net
+        // has to tell them apart, the main net cannot
+        let one = cozy_chess::Board::from_fen("6k1/8/1pK4p/bP6/1p6/8/P1B2P2/8 w - - 0 5", false).unwrap();
+        let two = cozy_chess::Board::from_fen("6k1/8/1pK4p/bP6/1p6/5P2/P1B2P2/8 w - - 0 4", false).unwrap();
+        assert!(crate::nnue::evaluate_fresh(&one) > crate::nnue::evaluate_fresh(&two) + 30, "{} {}", crate::nnue::evaluate_fresh(&one), crate::nnue::evaluate_fresh(&two));
+    }
 }
