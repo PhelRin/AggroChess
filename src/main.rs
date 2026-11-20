@@ -192,7 +192,7 @@ mod tests {
     fn prefers_sacrificial_mate() {
         // Re8# mates at once, but Qd8+! Bxd8 Re8# is prettier
         let b: Board = "6k1/5ppp/5b2/8/8/3Q4/5PPP/4R1K1 w - - 0 1".parse().unwrap();
-        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(500)), hard: Some(std::time::Duration::from_millis(1000)), nodes: None };
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(500)), hard: Some(std::time::Duration::from_millis(1000)), nodes: None, asked: None };
         let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
         assert!(score >= search::MATE_BOUND);
         assert_eq!(format!("{}", cozy_chess::util::display_uci_move(&b, m.unwrap())), "d3d8");
@@ -203,7 +203,7 @@ mod tests {
         // White is clearly worse here; with swindles on it may pick a trickier move, but it must
         // still be legal and respect the hard time limit
         let b: Board = "5r1R/ppp2kp1/3p4/4npr1/4P3/2P4Q/PPq3PP/4R1K1 w - - 3 23".parse().unwrap();
-        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(400)), hard: Some(std::time::Duration::from_millis(1200)), nodes: None };
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_millis(400)), hard: Some(std::time::Duration::from_millis(1200)), nodes: None, asked: None };
         let t = std::time::Instant::now();
         let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
         assert!(t.elapsed() < std::time::Duration::from_millis(1500), "took {:?}", t.elapsed());
@@ -397,6 +397,39 @@ mod tests {
         assert!(r.0.is_some());
     }
     #[test]
+    fn stalemate_box_needs_no_material_lead() {
+        // the Rxh1! study after 4.Bxg3: White's king has no move, the b2 pawn is stuck and
+        // only the bishop is left, so taking it is stalemate
+        let b = board("8/1k6/4p3/5p1p/1p6/1p4B1/pP6/K6n b - - 0 4");
+        assert_eq!(eval::stalemate_box_scale(&b).map(|x| x.0), Some(cozy_chess::Color::White));
+        // the same once the knight is gone and Black is only ahead in passed pawns
+        let b = board("8/1k6/4p3/5p1p/1p6/1p6/pP3B2/K7 b - - 0 5");
+        assert_eq!(eval::stalemate_box_scale(&b).map(|x| x.0), Some(cozy_chess::Color::White));
+        // a king that can still move is not boxed in
+        let b = board("8/1k6/4p3/5p1p/1p6/6B1/pP6/K6n b - - 0 4");
+        assert!(eval::stalemate_box_scale(&b).is_none());
+    }
+
+    #[test]
+    fn queen_left_hanging_is_a_sacrifice() {
+        // Byrne-Fischer 1956 after 17...Be6!!: the queen on b6 can be taken and is not won back
+        let b = board("r3r1k1/pp3pbp/1qp1b1p1/2B5/2BP4/Q1n2N2/P4PPP/3R1K1R w - - 4 18");
+        assert!(search::hangs_material(&b) >= 400);
+        // after 17...Nb1 the queen hangs too, but Black takes White's queen back at once
+        let b = board("r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q4N2/P4PPP/1n1R1K1R w - - 4 18");
+        assert!(search::hangs_material(&b) < 400);
+    }
+
+    #[test]
+    fn goring_gambit_is_the_book_move() {
+        let book = book::Book::new("no-such-book.bin");
+        let b = board("r1bqkbnr/pppp1ppp/2n5/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4");
+        for _ in 0..20 {
+            assert_eq!(book.get_move(&b).as_deref(), Some("c2c3"));
+        }
+    }
+
+    #[test]
     fn penrose_fortress_is_a_draw() {
         // Penrose's Puzzle: Black has a queen, two rooks and three bishops, but everything except
         // the dark-squared bishops is walled in and White lives on the light squares
@@ -455,7 +488,7 @@ mod tests {
             let mv = cozy_chess::util::parse_uci_move(&b, m).unwrap();
             b.play(mv);
         }
-        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_secs(30)), hard: Some(std::time::Duration::from_secs(30)), nodes: None };
+        let limits = search::Limits { depth: None, soft: Some(std::time::Duration::from_secs(30)), hard: Some(std::time::Duration::from_secs(30)), nodes: None, asked: None };
         let (m, score) = search::search_position(&b, &[], limits, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), false);
         assert_eq!(format!("{}", cozy_chess::util::display_uci_move(&b, m.unwrap())), "d1c2", "score {}", score);
     }
