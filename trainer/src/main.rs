@@ -287,13 +287,40 @@ fn load_float(path: &str) -> Net {
     n
 }
 
+/// A quantised network file read back as floats, to carry on training from a released net
+/// (the float file of a training run is not kept in the repository).
+fn load_quantised(path: &str) -> Net {
+    let mut v = Vec::new();
+    std::fs::File::open(path).unwrap().read_to_end(&mut v).unwrap();
+    assert_eq!(&v[0..4], b"AGNN", "bad network file");
+    let h = u32::from_le_bytes(v[4..8].try_into().unwrap()) as usize;
+    assert_eq!(h, H, "network has a different hidden size");
+    let mut n = Net::zeros();
+    let mut off = 8;
+    let mut rd = |dst: &mut Vec<f32>, scale: f32| {
+        for x in dst.iter_mut() {
+            *x = i16::from_le_bytes([v[off], v[off + 1]]) as f32 / scale;
+            off += 2;
+        }
+    };
+    rd(&mut n.ft_w, QA as f32);
+    rd(&mut n.ft_b, QA as f32);
+    rd(&mut n.out_w, QB as f32);
+    for x in n.out_b.iter_mut() {
+        *x = i32::from_le_bytes(v[off..off + 4].try_into().unwrap()) as f32 / (QA * QB) as f32;
+        off += 4;
+    }
+    n
+}
+
 fn train(args: &[String]) {
     let out = &args[0];
     let epochs: usize = args[1].parse().unwrap();
     let lr0: f32 = args[2].parse().unwrap();
     let wdl_w: f32 = args[3].parse().unwrap();
     let mut files: Vec<String> = args[4..].to_vec();
-    let resume = files.iter().position(|f| f.ends_with(".f32")).map(|i| files.remove(i));
+    // a ".f32" (float) or ".nnue" (quantised) file among the inputs is the net to carry on from
+    let resume = files.iter().position(|f| f.ends_with(".f32") || f.ends_with(".nnue")).map(|i| files.remove(i));
     let threads = std::env::var("THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(2usize);
     let batch = 16384usize;
 
@@ -312,6 +339,7 @@ fn train(args: &[String]) {
     let mut train_idx: Vec<u32> = train_idx.to_vec();
 
     let mut net = match &resume {
+        Some(p) if p.ends_with(".nnue") => load_quantised(p),
         Some(p) => load_float(p),
         None => Net::random(42),
     };

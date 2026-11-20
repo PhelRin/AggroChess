@@ -159,6 +159,90 @@ pub fn run(args: &[String]) {
     }
 }
 
+/// Teacher labels for chosen positions: `label <fens.txt> <out_prefix> <nodes> <threads>`.
+///
+/// Self-play at a few thousand nodes a move cannot play some endings right (long king walks
+/// with the opponent tied up, wins that only show after twenty moves), so the games it
+/// produces from such positions teach the wrong result. Here every position of a list is
+/// instead searched on its own, far deeper and with null-move verification on, and written
+/// with that search's score as the label. The trainer is told to use the score alone for
+/// these files. The positions and the labels are still only AggroChess's own search.
+pub fn label(args: &[String]) {
+    let fens = std::fs::read_to_string(&args[0]).expect("fen list");
+    let prefix = args.get(1).cloned().unwrap_or_else(|| "label".into());
+    let nodes: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2_000_000);
+    let threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+    let envi = |k: &str, d: i32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+
+    eval::AGGRESSION.store(100, Ordering::Relaxed);
+    eval::set_engine_color(None);
+    search::CONTEMPT.store(0, Ordering::Relaxed);
+    search::SACRIFICE_BONUS.store(0, Ordering::Relaxed);
+    search::SWINDLE.store(false, Ordering::Relaxed);
+    search::BEAUTIFUL_MATES.store(false, Ordering::Relaxed);
+    search::NULL_VERIFY.store(envi("AGGRO_NULLVERIFY", 3), Ordering::Relaxed);
+    search::NULL_VERIFY_DEPTH.store(envi("AGGRO_NULLVDEPTH", 6), Ordering::Relaxed);
+    search::DEEP.store(envi("AGGRO_LABEL_DEEP", 1) != 0, Ordering::Relaxed);
+
+    let boards: Vec<Board> = fens.lines().filter_map(|l| Board::from_fen(l.split(';').next().unwrap_or("").trim(), false).ok()).collect();
+    let boards = Arc::new(boards);
+    let next = Arc::new(AtomicU64::new(0));
+    let done = Arc::new(AtomicU64::new(0));
+    let start = std::time::Instant::now();
+    let mut handles = Vec::new();
+    for t in 0..threads {
+        let (boards, next, done) = (Arc::clone(&boards), Arc::clone(&next), Arc::clone(&done));
+        let path = format!("{}_{}.bin", prefix, t);
+        handles.push(
+            std::thread::Builder::new()
+                .stack_size(64 * 1024 * 1024)
+                .spawn(move || {
+                    let mut file = std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(&path).expect("open output"));
+                    let mut log = std::io::BufWriter::new(std::fs::OpenOptions::new().create(true).append(true).open(format!("{}.txt", path)).expect("open log"));
+                    let mut ns = NodeSearcher::new(64);
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed) as usize;
+                        if i >= boards.len() {
+                            break;
+                        }
+                        let board = &boards[i];
+                        if board.status() != GameStatus::Ongoing || !board.checkers().is_empty() {
+                            continue;
+                        }
+                        // a growing budget: most positions near the end of a plan are decided early
+                        let (mut mv, mut score) = (None, 0);
+                        for budget in [nodes / 16, nodes / 4, nodes] {
+                            let r = ns.search(board, &[], budget.max(1000), budget.max(1000) * 2);
+                            mv = r.0;
+                            score = r.1;
+                            if score.abs() >= 800 {
+                                break;
+                            }
+                        }
+                        let noisy = mv.map_or(true, |m| search::is_capture(board, m) || m.promotion.is_some());
+                        let white = if board.side_to_move() == Color::White { score } else { -score };
+                        let _ = writeln!(log, "{};{};{}", board, white, if noisy { "noisy" } else { "quiet" });
+                        if !noisy {
+                            let result = if white >= 400 { 2 } else if white <= -400 { 0 } else { 1 };
+                            file.write_all(&pack(board, white.clamp(-4000, 4000) as i16, result)).unwrap();
+                        }
+                        let d = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        if d % 200 == 0 {
+                            eprintln!("{} of {} positions, {:.0}s", d, boards.len(), start.elapsed().as_secs_f64());
+                            let _ = file.flush();
+                            let _ = log.flush();
+                        }
+                    }
+                })
+                .unwrap(),
+        );
+    }
+    for h in handles {
+        let _ = h.join();
+    }
+    eprintln!("labelled {} positions in {:.0}s", done.load(Ordering::Relaxed), start.elapsed().as_secs_f64());
+}
+
 fn worker(path: &str, seed: u64, soft: u64, target: u64, written: Arc<AtomicU64>, games: Arc<AtomicU64>) {
     let mut rng = Rng(seed);
     let sac_pct: u64 = std::env::var("AGGRO_SACS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);

@@ -24,6 +24,10 @@ fn main() {
         datagen::run(&args[2..]);
         return;
     }
+    if args.len() > 1 && args[1] == "label" {
+        datagen::label(&args[2..]);
+        return;
+    }
     if args.len() > 1 && args[1] == "evalcmp" {
         // print "classical nnue" (neutral, side to move's view) for every k-th record of a data file
         let data = std::fs::read(&args[2]).unwrap();
