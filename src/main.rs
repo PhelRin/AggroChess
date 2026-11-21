@@ -566,4 +566,18 @@ mod nnue_tests {
         let two = cozy_chess::Board::from_fen("6k1/8/1pK4p/bP6/1p6/5P2/P1B2P2/8 w - - 0 4", false).unwrap();
         assert!(crate::nnue::evaluate_fresh(&one) > crate::nnue::evaluate_fresh(&two) + 30, "{} {}", crate::nnue::evaluate_fresh(&one), crate::nnue::evaluate_fresh(&two));
     }
+
+    #[test]
+    fn sacrifice_count_takes_the_exchange_and_the_sham_sacrifice_but_not_a_trade() {
+        use cozy_chess::{Color::*, Square};
+        let count = |mat: &[i32], caps: &[Option<Square>]| crate::uci::count_sacrifices(mat, &[White, Black, White, Black], caps)[0];
+        // rook takes knight, pawn takes rook: the exchange is a sacrifice
+        assert_eq!(count(&[0, 320, -180, -180, -180], &[Some(Square::E5), Some(Square::E5), None, None]), 1);
+        // a quiet move, the opponent takes a knight, we take back on the same square: a trade
+        assert_eq!(count(&[0, 0, -320, 10, 10], &[None, Some(Square::F3), Some(Square::F3), None]), 0);
+        // knight takes f7, king takes knight, queen takes a rook elsewhere: won back, still a sacrifice
+        assert_eq!(count(&[0, 100, -220, 280, 280], &[Some(Square::F7), Some(Square::F7), Some(Square::A8), None]), 1);
+        // a single pawn is not counted
+        assert_eq!(count(&[0, 0, -100, -100, -100], &[None, Some(Square::E4), None, None]), 0);
+    }
 }

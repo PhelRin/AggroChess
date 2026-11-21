@@ -674,7 +674,9 @@ pub static PRESSURE_STEP: AtomicI32 = AtomicI32::new(15);
 /// Winning without having sacrificed (own score at least this, 0 = off): every material
 /// sacrifice that keeps the line at or above WIN_SAC_FLOOR gets the full bonus, so a won
 /// game still has its sacrifice before it ends.
-pub static WIN_SAC_AT: AtomicI32 = AtomicI32::new(500);
+pub static WIN_SAC_AT: AtomicI32 = AtomicI32::new(400);
+/// Giving material back counts: see `sac_params_for`.
+pub static GIVE_BACK: AtomicBool = AtomicBool::new(true);
 pub static WIN_SAC_FLOOR: AtomicI32 = AtomicI32::new(300);
 /// ...and far ahead, the bonus grows with the lead (part of the margin above the floor), since a
 /// stretched evaluation makes every give-away look dearer than its material.
@@ -715,10 +717,25 @@ pub fn sac_params_for(board: &Board) -> SacParams {
         }
         return p;
     }
+    // Ahead in material with no sacrifice yet, and not clearly winning: the opponent gave
+    // something first and has play for it. Giving part of it back is the classical defence
+    // and it is a sacrifice too, so any material sacrifice that keeps the game about level
+    // gets the full bonus. (The games that ended without a sacrifice were nearly all of this
+    // kind: the other side sacrificed, AggroChess sat on the material until the game was over.)
+    if GIVE_BACK.load(Ordering::Relaxed)
+        && board.fullmove_number() >= 16
+        && eval::material_balance(board, board.side_to_move()) >= 200
+        && LAST_SCORE.load(Ordering::Relaxed) < WIN_SAC_AT.load(Ordering::Relaxed)
+    {
+        p.any = true;
+        p.win = true;
+        p.floor = p.floor.max(-100);
+    }
     let moves = board.fullmove_number() as i32 - PRESSURE_START.load(Ordering::Relaxed);
     let last = LAST_SCORE.load(Ordering::Relaxed).abs();
     // a decided game ends soon (and a sacrifice costs little there): hurry
-    let decided = if last >= 600 { 30 } else if last >= 300 { 12 } else { 0 };
+    // (a won game owes its sacrifice from +4 on: the quick wins were the games that ended without one)
+    let decided = if last >= 600 || LAST_SCORE.load(Ordering::Relaxed) >= WIN_SAC_AT.load(Ordering::Relaxed).max(1) { 30 } else if last >= 300 { 12 } else { 0 };
     let t = (moves.max(0) + decided).min(30);
     if t == 0 {
         return p;
@@ -3419,6 +3436,11 @@ impl NodeSearcher {
         let tt = Arc::new(TranspositionTable::new(tt_mb));
         let s = Searcher::new(tt, Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)), true);
         Self { s }
+    }
+
+    /// Nodes of the latest search.
+    pub fn nodes(&self) -> u64 {
+        self.s.nodes
     }
 
     pub fn new_game(&mut self) {

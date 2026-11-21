@@ -73,7 +73,7 @@ pub fn uci_loop() {
 
         match tokens[0] {
             "uci" => {
-                out!("id name AggroChess 4.6.0");
+                out!("id name AggroChess 4.6.1");
                 out!("id author Rinarto Gibson");
                 // Only a few knobs are exposed on purpose. Everything else (hash size,
                 // contempt, time safety margin) is fixed at tuned defaults.
@@ -462,11 +462,16 @@ pub fn uci_loop() {
                 // material (White's view) before each move, and who moved, for sacrifice tracking
                 let mut mat_hist = vec![sac_material(&board)];
                 let mut movers = Vec::new();
+                // the square each move captured on (None: not a capture), to tell a trade from a sacrifice
+                let mut caps: Vec<Option<cozy_chess::Square>> = Vec::new();
                 if let Some(start) = moves_index {
                     for &mv_str in &tokens[start.min(tokens.len())..] {
                         match cozy_chess::util::parse_uci_move(&board, mv_str) {
                             Ok(mv) if board.is_legal(mv) => {
                                 movers.push(board.side_to_move());
+                                let takes = board.color_on(mv.to) == Some(!board.side_to_move())
+                                    || (board.piece_on(mv.from) == Some(cozy_chess::Piece::Pawn) && mv.from.file() != mv.to.file());
+                                caps.push(if takes { Some(mv.to) } else { None });
                                 board.play_unchecked(mv);
                                 history_hashes.push(board.hash());
                                 mat_hist.push(sac_material(&board));
@@ -478,7 +483,7 @@ pub fn uci_loop() {
                         }
                     }
                 }
-                let (sacs, last_sac) = count_sacrifices_ex(&mat_hist, &movers);
+                let (sacs, last_sac) = count_sacrifices_ex(&mat_hist, &movers, &caps);
                 search::GAME_SACS[0].store(sacs[0], Ordering::Relaxed);
                 search::GAME_SACS[1].store(sacs[1], Ordering::Relaxed);
                 for side in 0..2 {
@@ -652,15 +657,35 @@ fn sac_material(board: &Board) -> i32 {
     s
 }
 
-/// Sacrifices made by each colour in a game: the mover is at least 2 pawns down two plies
-/// later and still at least 1.5 pawns down two plies after that (the same rule as the match
-/// statistics). `mat_hist[k]` is the material before move `k`, `movers[k]` who made it.
-pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> [i32; 2] {
-    count_sacrifices_ex(mat_hist, movers).0
+/// Sacrifices made by each colour in a game.
+///
+/// A move is a sacrifice when, after the opponent's reply, the mover is at least 1.5 pawns
+/// down on the material he had before it: a piece, the exchange (a rook for a minor piece),
+/// two pawns; not a single pawn. One case is taken out: the reply was a capture and the
+/// mover's next move takes back on the same square and is within 1.5 pawns again. That is a
+/// trade the opponent started. Material won back any other way (a fork, a discovered attack,
+/// a mating net), however soon, leaves it a sacrifice.
+/// `mat_hist[k]` is the material before move `k`, `movers[k]` who made it, `caps[k]` the
+/// square it captured on.
+pub fn count_sacrifices(mat_hist: &[i32], movers: &[cozy_chess::Color], caps: &[Option<cozy_chess::Square>]) -> [i32; 2] {
+    count_sacrifices_ex(mat_hist, movers, caps).0
+}
+
+/// Is move `k` a sacrifice by `sign`'s side (see `count_sacrifices`)?
+fn is_sacrifice(mat_hist: &[i32], caps: &[Option<cozy_chess::Square>], k: usize, sign: i32) -> bool {
+    if k + 2 >= mat_hist.len() {
+        return false;
+    }
+    let before = mat_hist[k] * sign;
+    if mat_hist[k + 2] * sign > before - 150 {
+        return false;
+    }
+    let traded = k + 3 < mat_hist.len() && caps[k + 1].is_some() && caps[k + 2] == caps[k + 1] && mat_hist[k + 3] * sign > before - 150;
+    !traded
 }
 
 /// Sacrifices per side, and for each side the ply index of its latest sacrifice (-1: none).
-pub fn count_sacrifices_ex(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> ([i32; 2], [i64; 2]) {
+pub fn count_sacrifices_ex(mat_hist: &[i32], movers: &[cozy_chess::Color], caps: &[Option<cozy_chess::Square>]) -> ([i32; 2], [i64; 2]) {
     let mut sacs = [0; 2];
     let mut last = [-1i64; 2];
     // each side on its own, so one side's sacrifice never hides the other's
@@ -668,29 +693,16 @@ pub fn count_sacrifices_ex(mat_hist: &[i32], movers: &[cozy_chess::Color]) -> ([
         let sign = if side == cozy_chess::Color::White { 1 } else { -1 };
         let mut k = 0;
         while k < movers.len() {
-            if movers[k] != side {
-                k += 1;
-                continue;
-            }
-            let before = mat_hist[k] * sign;
-            if k + 2 < mat_hist.len() {
-                let after2 = mat_hist[k + 2] * sign;
-                let after4 = if k + 4 < mat_hist.len() { mat_hist[k + 4] * sign } else { after2 };
-                if after2 <= before - 200 && after4 <= before - 150 {
-                    sacs[side as usize] += 1;
-                    last[side as usize] = k as i64;
-                    // a follow-up sacrifice within the next two moves is part of the same
-                    // sequence: it extends the chain (latest sacrifice) without a new count
-                    let mut j = k + 2;
-                    while j < k + 4 && j < movers.len() {
-                        if movers[j] == side && j + 2 < mat_hist.len() && mat_hist[j + 2] * sign <= mat_hist[j] * sign - 200 {
-                            last[side as usize] = j as i64;
-                        }
-                        j += 2;
-                    }
-                    k += 4;
-                    continue;
+            if movers[k] == side && is_sacrifice(mat_hist, caps, k, sign) {
+                sacs[side as usize] += 1;
+                last[side as usize] = k as i64;
+                // a follow-up sacrifice on the mover's next move is part of the same
+                // sequence: it extends the chain (latest sacrifice) without a new count
+                if k + 2 < movers.len() && is_sacrifice(mat_hist, caps, k + 2, sign) {
+                    last[side as usize] = (k + 2) as i64;
                 }
+                k += 4;
+                continue;
             }
             k += 1;
         }
